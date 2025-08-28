@@ -12,7 +12,7 @@ uv venv && uv pip install -e .[dev]
 
 ## Usage
 
-csv-gallery path/to/images.csv \
+df-gallery path/to/images.csv \
   --out gallery.html \
   --path-col filename \
   --img-root /absolute/or/relative/prefix \
@@ -21,6 +21,8 @@ csv-gallery path/to/images.csv \
   --tile 200 \
   --title "My Image Gallery"
 ```
+
+or `dfg`
 
  The CSV must contain a column with image paths or URLs (default: filename). All columns become filterable fields in the UI.
 
