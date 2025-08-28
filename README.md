@@ -1,5 +1,11 @@
 # df-gallery
 
+[![PyPI](https://img.shields.io/pypi/v/df-gallery.svg)](https://pypi.org/project/df-gallery/)
+[![Python Versions](https://img.shields.io/pypi/pyversions/df-gallery.svg)](https://pypi.org/project/df-gallery/)
+[![License](https://img.shields.io/pypi/l/df-gallery.svg)](LICENSE)
+
+# df-gallery
+
 Generate a fast, filterable, shuffleable HTML image gallery from a CSV. Great for poking at large image folders with rich metadata filters (pandas-ish syntax in the browser).
 
 ## Install
