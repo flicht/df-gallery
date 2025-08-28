@@ -1,0 +1,31 @@
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - "v*"      # e.g. v0.1.2
+
+permissions:
+  contents: read
+  id-token: write   # <-- required for PyPI Trusted Publishers (OIDC)
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v2
+
+      - name: Build sdist + wheel
+        run: uv run -m build
+
+      - name: Check artifacts
+        run: uvx twine check dist/*
+
+      - name: Publish to PyPI (Trusted Publisher)
+        uses: pypa/gh-action-pypi-publish@v1.10.3
+        with:
+          packages-dir: dist
