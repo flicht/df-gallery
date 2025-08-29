@@ -10,7 +10,7 @@ Generate a fast, filterable, shuffleable HTML image gallery from a CSV. Great fo
 
 ## Install
 ```bash
-# from PyPI (after you publish)
+# from PyPI 
 pip install df-gallery
 
 # OR for development
