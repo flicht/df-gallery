@@ -7,6 +7,8 @@
 
 # df-gallery
 
+![Example](demo.png)
+
 Generate a fast, filterable, shuffleable HTML image gallery from a CSV. Great for poking at large image folders with rich metadata filters (pandas-ish syntax in the browser).
 
 ## Install
