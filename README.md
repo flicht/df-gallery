@@ -3,6 +3,7 @@
 [![PyPI](https://img.shields.io/pypi/v/df-gallery.svg)](https://pypi.org/project/df-gallery/)
 [![Python Versions](https://img.shields.io/pypi/pyversions/df-gallery.svg)](https://pypi.org/project/df-gallery/)
 [![License](https://img.shields.io/pypi/l/df-gallery.svg)](LICENSE)
+[![Publish](https://github.com/flicht/df-gallery/actions/workflows/publish.yml/badge.svg)](https://github.com/flicht/df-gallery/actions/workflows/publish.yml)
 
 # df-gallery
 
