@@ -60,3 +60,4 @@ jobs:
           packages-dir: dist
           verbose: true
           skip-existing: false
+          verify-metadata: false
