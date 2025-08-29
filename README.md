@@ -7,7 +7,7 @@
 
 # df-gallery
 
-![Example](demo.png)
+![Example]([demo.png](https://raw.githubusercontent.com/flicht/df-gallery/refs/heads/master/demo.png))
 
 Generate a fast, filterable, shuffleable HTML image gallery from a CSV. Great for poking at large image folders with rich metadata filters (pandas-ish syntax in the browser).
 
