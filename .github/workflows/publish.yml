@@ -3,11 +3,11 @@ name: Publish to PyPI
 on:
   push:
     tags:
-      - "v*"      # e.g. v0.1.2
+      - "v*"
 
 permissions:
   contents: read
-  id-token: write   # <-- required for PyPI Trusted Publishers (OIDC)
+  id-token: write  # required for PyPI Trusted Publishers (OIDC)
 
 jobs:
   build-and-publish:
@@ -16,16 +16,47 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # If your pyproject is in the repo root; otherwise set working-directory below.
+      - name: Show tree
+        run: |
+          pwd
+          ls -la
+          test -f pyproject.toml || (echo "pyproject.toml not found in repo root"; exit 1)
+
       - name: Set up uv
         uses: astral-sh/setup-uv@v2
 
       - name: Build sdist + wheel
         run: uv run -m build
 
-      - name: Check artifacts
+      - name: Inspect artifacts
+        run: |
+          ls -l dist
+          python - << 'PY'
+          import sys, zipfile, glob, os
+          wheels = glob.glob("dist/*.whl")
+          if not wheels:
+            print("No wheels found in dist/", file=sys.stderr); sys.exit(1)
+          for whl in wheels:
+            print("==", whl, "==")
+            with zipfile.ZipFile(whl) as z:
+              names = z.namelist()
+              meta = [n for n in names if n.endswith(".dist-info/METADATA")]
+              print("  has METADATA?", bool(meta))
+              if meta:
+                with z.open(meta[0]) as f:
+                  head = f.read(400).decode("utf-8", "replace")
+                  print("--- METADATA head ---")
+                  print(head)
+                  print("---------------------")
+          PY
+
+      - name: Twine check
         run: uvx twine check dist/*
 
       - name: Publish to PyPI (Trusted Publisher)
         uses: pypa/gh-action-pypi-publish@v1.10.3
         with:
           packages-dir: dist
+          verbose: true
+          skip-existing: false
