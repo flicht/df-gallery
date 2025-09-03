@@ -34,7 +34,7 @@ HTML_TEMPLATE = """<!doctype html>
   .bar {{ display: grid; grid-template-columns: 1fr auto auto auto auto auto; grid-gap: 12px; align-items: center; }}
   .bar2 {{ display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 8px; }}
   h1 {{ font-size: 18px; margin: 0; font-weight: 650; letter-spacing: 0.2px; }}
-  button, input[type="range"], input[type="text"], select {{
+  button, input[type="range"], input[type="text"], select, .tab {{
     appearance: none;
     background: var(--card);
     color: var(--fg);
@@ -44,10 +44,20 @@ HTML_TEMPLATE = """<!doctype html>
     font-weight: 600;
   }}
   button {{ cursor: pointer; }}
-  button:hover {{ border-color: var(--accent); }}
+  button:hover, .tab:hover {{ border-color: var(--accent); }}
   input[type="text"] {{ width: 100%; font-weight: 500; }}
   .hint {{ color: var(--muted); font-size: 12px; }}
 
+  /* Tabs */
+  .tabs {{ display:flex; gap:8px; margin-top: 10px; }}
+  .tab {{ cursor:pointer; user-select:none; }}
+  .tab.active {{ border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }}
+
+  /* Views */
+  .view {{ display:none; }}
+  .view.active {{ display:block; }}
+
+  /* Gallery grid */
   .grid {{
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(var(--tile), 1fr));
@@ -92,6 +102,20 @@ HTML_TEMPLATE = """<!doctype html>
   .pager {{ display:flex; gap:8px; align-items:center; font-size: 13px; }}
   .pager .nums {{ opacity: .8; }}
   .footer-space {{ height: 24px; }}
+
+  /* Stats layout */
+  .stats-wrap {{ max-width: 1400px; margin: 0 auto; padding: 16px; display:grid; gap:12px; }}
+  .stats-controls {{ display:flex; gap:12px; align-items:center; flex-wrap:wrap; }}
+  .cards {{ display:grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }}
+  .card {{
+    background: var(--card); border: 1px solid #1f2230; border-radius: var(--radius);
+    padding: 12px; display:flex; flex-direction:column; gap:8px;
+  }}
+  .card h3 {{ margin:0; font-size: 14px; font-weight:700; letter-spacing:.2px; }}
+  .small {{ color: var(--muted); font-size: 12px; }}
+  .canvas-wrap {{ width:100%; height:220px; }}
+  .canvas-wrap canvas {{ width:100%; height:100%; display:block; }}
+  .badge {{ background:#0e0f12; border:1px solid #2a2d39; border-radius: 999px; padding:2px 8px; font-size:11px; color: var(--muted); }}
 </style>
 </head>
 <body>
@@ -119,6 +143,7 @@ HTML_TEMPLATE = """<!doctype html>
         </select>
       </div>
     </div>
+
     <div class="bar2">
       <input id="filter" type="text" placeholder="pandas-style filter, e.g. extension in ['.png','.jpg'] and unique_colors < 500" />
       <button id="apply">Apply</button>
@@ -135,12 +160,36 @@ HTML_TEMPLATE = """<!doctype html>
       </select>
       <span class="err" id="err"></span>
     </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <div class="tab active" data-tab="gallery" id="tab-gallery-btn">Gallery</div>
+      <div class="tab" data-tab="stats" id="tab-stats-btn">Distributions</div>
+    </div>
   </div>
 </header>
 
 <main>
-  <div id="grid" class="grid"></div>
-  <div class="footer-space"></div>
+  <!-- Gallery view -->
+  <section id="view-gallery" class="view active">
+    <div id="grid" class="grid"></div>
+    <div class="footer-space"></div>
+  </section>
+
+  <!-- Stats view -->
+  <section id="view-stats" class="view">
+    <div class="stats-wrap">
+      <div class="stats-controls">
+        <label class="hint">Compute over:</label>
+        <select id="stats-scope">
+          <option value="filtered" selected>Filtered rows</option>
+          <option value="all">All rows</option>
+        </select>
+        <span class="small" id="stats-summary"></span>
+      </div>
+      <div id="stats-cards" class="cards"></div>
+    </div>
+  </section>
 </main>
 
 <script>
@@ -162,6 +211,17 @@ HTML_TEMPLATE = """<!doctype html>
   const pageCur = document.getElementById('page-cur');
   const pageTotal = document.getElementById('page-total');
   const pageSizeSel = document.getElementById('page-size');
+
+  // Tabs
+  const tabGalleryBtn = document.getElementById('tab-gallery-btn');
+  const tabStatsBtn = document.getElementById('tab-stats-btn');
+  const viewGallery = document.getElementById('view-gallery');
+  const viewStats = document.getElementById('view-stats');
+
+  // Stats elements
+  const statsScopeSel = document.getElementById('stats-scope');
+  const statsCards = document.getElementById('stats-cards');
+  const statsSummary = document.getElementById('stats-summary');
 
   let filtered = DATA.slice();
   let order = filtered.map(r => r.src);
@@ -200,7 +260,7 @@ HTML_TEMPLATE = """<!doctype html>
   }}
 
   function translate(expr) {{
-    let e = expr.trim();
+    let e = (expr || '').trim();
     e = e.replace(/\\bis\\s+null\\b/gi, ' == null');
     e = e.replace(/\\bis\\s+not\\s+null\\b/gi, ' != null');
     e = e.replace(/\\band\\b/gi, '&&');
@@ -217,7 +277,7 @@ HTML_TEMPLATE = """<!doctype html>
 
   function compileFilter(expr) {{
     const js = translate(expr);
-    const fn = new Function('scope', `with (scope) {{ return (${{js}}); }}`);
+    const fn = new Function('scope', `with (scope) {{ return (${{js || 'true'}}); }}`);
     return (row) => !!fn(makeScope(row));
   }}
 
@@ -242,6 +302,7 @@ HTML_TEMPLATE = """<!doctype html>
     order = filtered.map(r => r.src);
     pageIndex = 0;
     renderAll();
+    if (isStatsActive()) renderStats();
   }}
 
   function updateCounter() {{
@@ -323,6 +384,13 @@ HTML_TEMPLATE = """<!doctype html>
   document.getElementById('clear').addEventListener('click', () => {{ filterInput.value = ''; applyFilter(''); }});
   document.getElementById('examples').addEventListener('change', (e) => {{ if (e.target.value) {{ filterInput.value = e.target.value; e.target.selectedIndex = 0; }} }});
 
+  // Pagination buttons
+  firstBtn.addEventListener('click', () => {{ pageIndex = 0; renderAll(); }});
+  prevBtn.addEventListener('click', () => {{ pageIndex = Math.max(0, pageIndex - 1); renderAll(); }});
+  nextBtn.addEventListener('click', () => {{ const b = bounds(); pageIndex = Math.min(b.totalPages - 1, pageIndex + 1); renderAll(); }});
+  lastBtn.addEventListener('click', () => {{ const b = bounds(); pageIndex = b.totalPages - 1; renderAll(); }});
+  pageSizeSel.addEventListener('change', () => {{ pageSize = parseInt(pageSizeSel.value, 10) || DEFAULT_PAGE_SIZE; pageIndex = 0; renderAll(); }});
+
   function setMetaHidden(hidden) {{
     document.documentElement.classList.toggle('meta-hidden', hidden);
     toggleMetaBtn.textContent = hidden ? 'Show meta' : 'Hide meta';
@@ -331,6 +399,161 @@ HTML_TEMPLATE = """<!doctype html>
     const hidden = !document.documentElement.classList.contains('meta-hidden'); setMetaHidden(hidden);
   }});
 
+  // ---- Tabs handling ----
+  function isStatsActive() {{ return viewStats.classList.contains('active'); }}
+  function afterLayout(fn){{ (window.requestAnimationFrame||setTimeout)(fn,0); }}
+
+  function setTab(name) {{
+    const tabs = [['gallery', tabGalleryBtn, viewGallery], ['stats', tabStatsBtn, viewStats]];
+    for (const [n,btn,view] of tabs) {{
+      const on = (n===name);
+      btn.classList.toggle('active',on);
+      view.classList.toggle('active',on);
+    }}
+    if(name==='stats') afterLayout(()=>renderStats());
+  }}
+  tabGalleryBtn.addEventListener('click',()=>setTab('gallery'));
+  tabStatsBtn.addEventListener('click',()=>setTab('stats'));
+
+  // ---- Stats helpers ----
+  function valuesFor(col,rows) {{
+    const out=[]; let missing=0;
+    for(const r of rows) {{
+      if(!(col in r) || r[col]==null || r[col]===''){{ missing++; continue; }}
+      out.push(r[col]);
+    }}
+    return {{values:out,missing}};
+  }}
+
+  function coerceNumericArray(arr) {{
+    const out=[];
+    for(const v of arr){{
+      if(typeof v==='number'&&Number.isFinite(v)){{out.push(v);continue;}}
+      if(typeof v==='string'){{
+        const t=v.trim(); if(t!==''&&!isNaN(t)){{out.push(Number(t));continue;}}
+      }}
+      return null; // mixed types → treat as categorical
+    }}
+    return out;
+  }}
+
+  function numericSummary(xsRaw){{
+    if(!xsRaw.length) return{{min:0,q1:0,median:0,q3:0,max:0}};
+    const xs=xsRaw.slice().sort((a,b)=>a-b);
+    const n=xs.length;
+    const pick=p=>xs[Math.min(n-1,Math.max(0,Math.floor(p*(n-1))))];
+    return{{min:xs[0],q1:pick(0.25),median:pick(0.5),q3:pick(0.75),max:xs[n-1]}};
+  }}
+
+  function chooseBins(n){{ return Math.max(5,Math.min(60,Math.round(Math.sqrt(Math.max(1,n))))); }}
+
+  function makeHistogram(arr){{
+    if(!arr.length) return{{bins:[],counts:[],lo:0,hi:1}};
+    const{{min,q1,q3,max}}=numericSummary(arr);
+    const iqr=q3-q1;
+    const lo=Math.min(min,q1-1.5*iqr);
+    const hi=Math.max(max,q3+1.5*iqr);
+    const k=chooseBins(arr.length);
+    const width=(hi-lo)||1;
+    const step=width/k;
+    const counts=Array(k).fill(0);
+    for(const x of arr){{
+      const idx=Math.max(0,Math.min(k-1,Math.floor((x-lo)/step)));
+      counts[idx]+=1;
+    }}
+    const bins=Array.from({{length:k}},(_,i)=>lo+i*step);
+    return{{bins,counts,lo,hi}};
+  }}
+
+  function catCounts(arr,maxCats=15){{
+    const m=new Map();
+    for(const v of arr){{const key=String(v);m.set(key,(m.get(key)||0)+1);}}
+    const entries=Array.from(m.entries()).sort((a,b)=>b[1]-a[1]);
+    if(entries.length<=maxCats) return entries;
+    const head=entries.slice(0,maxCats-1);
+    const tail=entries.slice(maxCats-1);
+    const other=tail.reduce((s,[,c])=>s+c,0);
+    head.push(['__OTHER__',other]);
+    return head;
+  }}
+
+  function drawBars(canvas,labels,values,opts={{}}){{
+    const dpr=window.devicePixelRatio||1;
+    const Wcss=canvas.clientWidth||canvas.parentElement.clientWidth||320;
+    const Hcss=canvas.clientHeight||canvas.parentElement.clientHeight||220;
+    const W=Math.max(10,Math.floor(Wcss*dpr));
+    const H=Math.max(10,Math.floor(Hcss*dpr));
+    canvas.width=W; canvas.height=H;
+    const ctx=canvas.getContext('2d');
+    ctx.clearRect(0,0,W,H);
+    ctx.font=`${{12*dpr}}px system-ui,-apple-system,Segoe UI,Roboto,Inter,sans-serif`;
+    ctx.fillStyle='#eaeaea'; ctx.strokeStyle='#2a2d39';
+    const pad=10*dpr;
+    const x0=pad,y0=H-22*dpr;
+    const x1=W-pad,y1=pad;
+    const n=Math.max(1,values.length);
+    const vmax=Math.max(1,...values,1);
+    const bw=(x1-x0)/n;
+    ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(x1,y0); ctx.stroke();
+    for(let i=0;i<n;i++){{const v=values[i]||0;const h=(v/vmax)*(y0-y1);const x=x0+i*bw+1*dpr;const y=y0-h;ctx.fillStyle='#3ea6ff';ctx.fillRect(x,y,Math.max(1*dpr,bw-2*dpr),h);}}
+    const maxLabels=Math.min(10,n); const step=Math.max(1,Math.round(n/maxLabels));
+    ctx.fillStyle='#9aa0a6'; ctx.textAlign='center'; ctx.textBaseline='top';
+    for(let i=0;i<n;i+=step){{const x=x0+i*bw+bw/2;const raw=labels[i]??'';const txt=(opts.tickFmt?opts.tickFmt(raw):String(raw));ctx.fillText(txt,x,y0+4*dpr);}}
+  }}
+
+  function renderStats(){{
+    try{{
+      const scope=(statsScopeSel.value==='filtered')?filtered:DATA;
+      const rows=scope;
+      const cols=Object.keys(rows[0]||{{}}).filter(k=>k!=='src');
+      statsCards.innerHTML='';
+      statsSummary.textContent=`${{rows.length}} rows • ${{cols.length}} columns`;
+      if(!rows.length||!cols.length) return;
+
+      for(const col of cols){{
+        const{{values,missing}}=valuesFor(col,rows);
+        const card=document.createElement('div'); card.className='card';
+
+        const header=document.createElement('div');
+        header.style.display='flex'; header.style.justifyContent='space-between'; header.style.alignItems='baseline';
+        const title=document.createElement('h3'); title.textContent=col;
+        const meta=document.createElement('span'); meta.className='small'; meta.textContent=`missing: ${{missing}}`;
+        header.appendChild(title); header.appendChild(meta);
+
+        const canvasWrap=document.createElement('div'); canvasWrap.className='canvas-wrap';
+        const canvas=document.createElement('canvas'); canvasWrap.appendChild(canvas);
+
+        const footer=document.createElement('div'); footer.className='small';
+
+        const numeric=coerceNumericArray(values);
+        if(numeric&&numeric.length){{
+          const hist=makeHistogram(numeric);
+          drawBars(canvas,hist.bins,hist.counts,{{tickFmt:(x)=>{{const num=Number(x);if(!Number.isFinite(num))return'';const s=Math.abs(num)>=1000?(num/1000).toFixed(1)+'k':num.toFixed(2);return s.replace(/\\.00$/,'');}}}});
+          const s=numericSummary(numeric);
+          footer.innerHTML=`<span class="badge">numeric</span> <span class="small">min ${{s.min}}, q1 ${{s.q1}}, med ${{s.median}}, q3 ${{s.q3}}, max ${{s.max}}</span>`;
+        }} else {{
+          const counts=catCounts(values,15);
+          const labels=counts.map(([k,_])=>k==='__OTHER__'?'Other':k);
+          const vals=counts.map(([_,v])=>v);
+          drawBars(canvas,labels,vals,{{tickFmt:(t)=>{{const s=String(t);return s.length>8?s.slice(0,8)+'…':s;}}}});
+          footer.innerHTML=`<span class="badge">categorical</span> <span class="small">${{labels.length}} shown${{counts.length>labels.length?' (top)':''}}</span>`;
+        }}
+
+        card.appendChild(header);
+        card.appendChild(canvasWrap);
+        card.appendChild(footer);
+        statsCards.appendChild(card);
+      }}
+    }} catch (e) {{
+      console.error('renderStats error:', e);
+      statsCards.innerHTML = `<div class="small">Error rendering stats: ${{String(e)}}</div>`;
+    }}
+  }}
+
+  statsScopeSel.addEventListener('change', () => renderStats());
+  window.addEventListener('resize', () => {{ if (isStatsActive()) renderStats(); }});
+
+  // ---- Init ----
   window.addEventListener('load', () => {{
     setMetaHidden(document.documentElement.classList.contains('meta-hidden'));
     [...pageSizeSel.options].forEach(o => {{ if (parseInt(o.value,10) === DEFAULT_PAGE_SIZE) o.selected = true; }});
