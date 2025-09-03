@@ -566,6 +566,48 @@ HTML_TEMPLATE = """<!doctype html>
 
 # ---------- helpers (Python) ----------
 
+def _scan_directory(dir_path: Path, extract_metadata: bool = False) -> List[Dict[str, Any]]:
+    """Scan directory for image files and return list of metadata dictionaries."""
+    image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff', '.tif'}
+    rows: List[Dict[str, Any]] = []
+    
+    for img_path in dir_path.rglob('*'):
+        if img_path.is_file() and img_path.suffix.lower() in image_extensions:
+            try:
+                # Basic metadata
+                stat = img_path.stat()
+                relative_path = str(img_path.relative_to(dir_path))
+                row = {
+                    'filename': relative_path,
+                    'src': relative_path,  # HTML template expects 'src' field
+                    'extension': img_path.suffix.lower(),
+                    'filesize_bytes': stat.st_size,
+                    'modified_time': stat.st_mtime,
+                }
+                
+                # Optional detailed metadata extraction
+                if extract_metadata:
+                    try:
+                        from PIL import Image
+                        with Image.open(img_path) as img:
+                            row.update({
+                                'width': img.width,
+                                'height': img.height,
+                                'format': img.format,
+                                'mode': img.mode,
+                                'has_alpha_channel': 'A' in img.mode or img.mode == 'RGBA',
+                            })
+                    except Exception:
+                        # If PIL fails, continue without detailed metadata
+                        pass
+                
+                rows.append(row)
+            except Exception:
+                # Skip files that can't be accessed
+                continue
+    
+    return rows
+
 def _coerce_value(v: str):
     s = (v or "").strip()
     if s == "":
@@ -641,22 +683,30 @@ class _NoCacheHandler(SimpleHTTPRequestHandler):
 
 def _serve_file(html_path: Path, host: str, port: int, open_browser: bool):
     root = html_path.parent.resolve()
-    handler_cls = _NoCacheHandler
-    handler_cls.directory = str(root)
-    handler_cls.html_name = html_path.name  # type: ignore[attr-defined]
-    httpd = ThreadingHTTPServer((host, port), handler_cls)
-    url = f"http://{host}:{port}/{html_path.name}"
-    print(f"Serving {html_path} at {url} (Ctrl+C to stop)")
-    # only try to open if there looks to be a display (avoid headless SSH spam)
-    if open_browser and os.environ.get("DISPLAY") and not os.environ.get("SSH_CONNECTION"):
-        try:
-            webbrowser.open(url)
-        except Exception:
-            pass
+    
+    # Change to the directory containing the HTML file
+    original_cwd = os.getcwd()
+    os.chdir(root)
+    
     try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        print("\nServer stopped.")
+        class CustomHandler(_NoCacheHandler):
+            html_name = html_path.name
+        
+        httpd = ThreadingHTTPServer((host, port), CustomHandler)
+        url = f"http://{host}:{port}/{html_path.name}"
+        print(f"Serving {html_path} at {url} (Ctrl+C to stop)")
+        # only try to open if there looks to be a display (avoid headless SSH spam)
+        if open_browser and os.environ.get("DISPLAY") and not os.environ.get("SSH_CONNECTION"):
+            try:
+                webbrowser.open(url)
+            except Exception:
+                pass
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:
+            print("\nServer stopped.")
+    finally:
+        os.chdir(original_cwd)  # Restore original directory
 
 # ---------- subcommands ----------
 
@@ -729,6 +779,44 @@ def cmd_serve(args) -> int:
     _serve_file(html_path, args.host, args.port, args.open_browser)
     return 0
 
+def cmd_serve_dir(args) -> int:
+    """Serve images from a directory by generating HTML on-the-fly."""
+    dir_path = Path(args.dir).resolve()
+    if not dir_path.exists() or not dir_path.is_dir():
+        print(f"error: directory not found: {dir_path}", file=sys.stderr)
+        return 2
+    
+    print(f"Scanning directory: {dir_path}")
+    rows = _scan_directory(dir_path, extract_metadata=args.extract_metadata)
+    
+    if not rows:
+        print("No image files found in directory", file=sys.stderr)
+        return 1
+    
+    print(f"Found {len(rows)} images")
+    
+    # Generate HTML in memory
+    html = _render_html(
+        title=args.title,
+        rows=rows,
+        chunk_size=args.chunk,
+        tile_px=args.tile,
+        show_cols=args.show_cols,
+        collapse_meta=args.collapse_meta,
+        page_size=args.page_size,
+    )
+    
+    # Write HTML file to the image directory so it can be served alongside images
+    html_in_dir = dir_path / "gallery.html"
+    print(f"Writing HTML file to: {html_in_dir}")
+    html_in_dir.write_text(html, encoding="utf-8")
+    print(f"HTML file created successfully: {html_in_dir.exists()}")
+    
+    # Use the existing _serve_file function which properly handles server setup
+    _serve_file(html_in_dir, args.host, args.port, args.open_browser)
+    
+    return 0
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="df-gallery", description="Build and serve filterable, paginated HTML image galleries.")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -756,15 +844,36 @@ def main() -> int:
     b.set_defaults(open_browser=True, func=cmd_build)
 
     # serve subcommand
-    s = sub.add_parser("serve", help="Serve an existing gallery HTML without rebuilding.")
-    s.add_argument("html", help="Path to gallery.html")
+    s = sub.add_parser("serve", help="Serve an existing gallery HTML or serve images from a directory.")
+    s.add_argument("html", nargs="?", help="Path to gallery.html (optional if --dir is used)")
+    s.add_argument("--dir", help="Directory containing images to serve")
     s.add_argument("--host", default="127.0.0.1", help="Host (default: 127.0.0.1)")
     s.add_argument("--port", type=int, default=8000, help="Port (default: 8000)")
+    s.add_argument("--title", default="Image Gallery", help="Gallery title (for --dir mode)")
+    s.add_argument("--extract-metadata", action="store_true", help="Extract detailed image metadata (requires PIL)")
+    s.add_argument("--chunk", type=int, default=500, help="Tiles to add per render batch (default: 500)")
+    s.add_argument("--tile", type=int, default=200, help="Base tile size in px (default: 200)")
+    s.add_argument("--show-cols", nargs="*", default=None, help="Subset of columns to show (defaults to all except 'src').")
+    s.add_argument("--collapse-meta", action="store_true", help="Start with metadata hidden (global toggle controls all).")
+    s.add_argument("--page-size", type=int, default=250, help="Initial page size (user can change in UI).")
     s.add_argument("--open", dest="open_browser", action="store_true", help="Open browser after starting server")
     s.add_argument("--no-open", dest="open_browser", action="store_false", help="Do not open browser")
     s.set_defaults(open_browser=True, func=cmd_serve)
 
     args = ap.parse_args()
+    
+    # Handle serve command logic
+    if args.cmd == "serve":
+        if args.dir:
+            # Directory mode - use cmd_serve_dir
+            return cmd_serve_dir(args)
+        elif args.html:
+            # File mode - use cmd_serve
+            return cmd_serve(args)
+        else:
+            print("error: must specify either HTML file or --dir", file=sys.stderr)
+            return 2
+    
     return args.func(args)
 
 if __name__ == "__main__":
