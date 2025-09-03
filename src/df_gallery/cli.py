@@ -848,7 +848,7 @@ def main() -> int:
     s.add_argument("html", nargs="?", help="Path to gallery.html (optional if --dir is used)")
     s.add_argument("--dir", help="Directory containing images to serve")
     s.add_argument("--host", default="127.0.0.1", help="Host (default: 127.0.0.1)")
-    s.add_argument("--port", type=int, default=8000, help="Port (default: 8000)")
+    s.add_argument("--port", type=int, default=8010, help="Port (default: 8010)")
     s.add_argument("--title", default="Image Gallery", help="Gallery title (for --dir mode)")
     s.add_argument("--extract-metadata", action="store_true", help="Extract detailed image metadata (requires PIL)")
     s.add_argument("--chunk", type=int, default=500, help="Tiles to add per render batch (default: 500)")
