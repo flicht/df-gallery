@@ -116,7 +116,7 @@ HTML_TEMPLATE = """<!doctype html>
   .canvas-wrap {{ width:100%; height:220px; }}
   .canvas-wrap canvas {{ width:100%; height:100%; display:block; }}
   .badge {{ background:#0e0f12; border:1px solid #2a2d39; border-radius: 999px; padding:2px 8px; font-size:11px; color: var(--muted); }}
-  
+
   /* Category sections */
   .category-section {{ margin-bottom: 24px; }}
   .category-header {{ 
