@@ -116,6 +116,15 @@ HTML_TEMPLATE = """<!doctype html>
   .canvas-wrap {{ width:100%; height:220px; }}
   .canvas-wrap canvas {{ width:100%; height:100%; display:block; }}
   .badge {{ background:#0e0f12; border:1px solid #2a2d39; border-radius: 999px; padding:2px 8px; font-size:11px; color: var(--muted); }}
+  
+  /* Category sections */
+  .category-section {{ margin-bottom: 24px; }}
+  .category-header {{ 
+    background: var(--card); border: 1px solid #1f2230; border-radius: var(--radius);
+    padding: 12px 16px; margin-bottom: 12px; font-weight: 600; font-size: 14px;
+    color: var(--accent); border-left: 4px solid var(--accent);
+  }}
+  .category-cards {{ display:grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }}
 </style>
 </head>
 <body>
@@ -185,6 +194,10 @@ HTML_TEMPLATE = """<!doctype html>
           <option value="filtered" selected>Filtered rows</option>
           <option value="all">All rows</option>
         </select>
+        <label class="hint">Split by category:</label>
+        <select id="categorical-split">
+          <option value="">None</option>
+        </select>
         <span class="small" id="stats-summary"></span>
       </div>
       <div id="stats-cards" class="cards"></div>
@@ -220,6 +233,7 @@ HTML_TEMPLATE = """<!doctype html>
 
   // Stats elements
   const statsScopeSel = document.getElementById('stats-scope');
+  const categoricalSplitSel = document.getElementById('categorical-split');
   const statsCards = document.getElementById('stats-cards');
   const statsSummary = document.getElementById('stats-summary');
 
@@ -477,6 +491,51 @@ HTML_TEMPLATE = """<!doctype html>
     return head;
   }}
 
+  function detectCategoricalColumns(rows) {{
+    const cols = Object.keys(rows[0] || {{}}).filter(k => k !== 'src');
+    const categorical = [];
+    
+    for (const col of cols) {{
+      const {{values}} = valuesFor(col, rows);
+      const numeric = coerceNumericArray(values);
+      
+      // Consider categorical if:
+      // 1. Not numeric (mixed types or all non-numeric)
+      // 2. Numeric but has limited unique values (like boolean or small enum)
+      if (!numeric || (numeric.length > 0 && new Set(values).size <= 20)) {{
+        categorical.push(col);
+      }}
+    }}
+    
+    return categorical;
+  }}
+
+  function populateCategoricalDropdown(rows) {{
+    const categoricalCols = detectCategoricalColumns(rows);
+    categoricalSplitSel.innerHTML = '<option value="">None</option>';
+    
+    for (const col of categoricalCols) {{
+      const option = document.createElement('option');
+      option.value = col;
+      option.textContent = col;
+      categoricalSplitSel.appendChild(option);
+    }}
+  }}
+
+  function groupByCategory(rows, categoryCol) {{
+    if (!categoryCol) return {{ 'All': rows }};
+    
+    const groups = new Map();
+    for (const row of rows) {{
+      const value = row[categoryCol];
+      const key = value == null ? 'Missing' : String(value);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(row);
+    }}
+    
+    return Object.fromEntries(groups);
+  }}
+
   function drawBars(canvas,labels,values,opts={{}}){{
     const dpr=window.devicePixelRatio||1;
     const Wcss=canvas.clientWidth||canvas.parentElement.clientWidth||320;
@@ -506,43 +565,74 @@ HTML_TEMPLATE = """<!doctype html>
       const scope=(statsScopeSel.value==='filtered')?filtered:DATA;
       const rows=scope;
       const cols=Object.keys(rows[0]||{{}}).filter(k=>k!=='src');
+      const categoryCol = categoricalSplitSel.value;
+      
       statsCards.innerHTML='';
       statsSummary.textContent=`${{rows.length}} rows • ${{cols.length}} columns`;
       if(!rows.length||!cols.length) return;
 
-      for(const col of cols){{
-        const{{values,missing}}=valuesFor(col,rows);
-        const card=document.createElement('div'); card.className='card';
+      // Group data by category if a category column is selected
+      const groups = groupByCategory(rows, categoryCol);
+      const groupNames = Object.keys(groups).sort();
 
-        const header=document.createElement('div');
-        header.style.display='flex'; header.style.justifyContent='space-between'; header.style.alignItems='baseline';
-        const title=document.createElement('h3'); title.textContent=col;
-        const meta=document.createElement('span'); meta.className='small'; meta.textContent=`missing: ${{missing}}`;
-        header.appendChild(title); header.appendChild(meta);
-
-        const canvasWrap=document.createElement('div'); canvasWrap.className='canvas-wrap';
-        const canvas=document.createElement('canvas'); canvasWrap.appendChild(canvas);
-
-        const footer=document.createElement('div'); footer.className='small';
-
-        const numeric=coerceNumericArray(values);
-        if(numeric&&numeric.length){{
-          const hist=makeHistogram(numeric);
-          drawBars(canvas,hist.bins,hist.counts,{{tickFmt:(x)=>{{const num=Number(x);if(!Number.isFinite(num))return'';const s=Math.abs(num)>=1000?(num/1000).toFixed(1)+'k':num.toFixed(2);return s.replace(/\\.00$/,'');}}}});
-          const s=numericSummary(numeric);
-          footer.innerHTML=`<span class="badge">numeric</span> <span class="small">min ${{s.min}}, q1 ${{s.q1}}, med ${{s.median}}, q3 ${{s.q3}}, max ${{s.max}}</span>`;
-        }} else {{
-          const counts=catCounts(values,15);
-          const labels=counts.map(([k,_])=>k==='__OTHER__'?'Other':k);
-          const vals=counts.map(([_,v])=>v);
-          drawBars(canvas,labels,vals,{{tickFmt:(t)=>{{const s=String(t);return s.length>8?s.slice(0,8)+'…':s;}}}});
-          footer.innerHTML=`<span class="badge">categorical</span> <span class="small">${{labels.length}} shown${{counts.length>labels.length?' (top)':''}}</span>`;
+      for(const groupName of groupNames){{
+        const groupRows = groups[groupName];
+        const groupCount = groupRows.length;
+        
+        // Create category section
+        const categorySection = document.createElement('div');
+        categorySection.className = 'category-section';
+        
+        // Add category header if we have multiple groups
+        if(groupNames.length > 1){{
+          const categoryHeader = document.createElement('div');
+          categoryHeader.className = 'category-header';
+          categoryHeader.textContent = `${{groupName}} (${{groupCount}} items)`;
+          categorySection.appendChild(categoryHeader);
         }}
+        
+        // Create cards container for this category
+        const categoryCards = document.createElement('div');
+        categoryCards.className = groupNames.length > 1 ? 'category-cards' : 'cards';
+        
+        // Generate charts for each column in this category
+        for(const col of cols){{
+          const{{values,missing}}=valuesFor(col,groupRows);
+          const card=document.createElement('div'); card.className='card';
 
-        card.appendChild(header);
-        card.appendChild(canvasWrap);
-        card.appendChild(footer);
-        statsCards.appendChild(card);
+          const header=document.createElement('div');
+          header.style.display='flex'; header.style.justifyContent='space-between'; header.style.alignItems='baseline';
+          const title=document.createElement('h3'); title.textContent=col;
+          const meta=document.createElement('span'); meta.className='small'; meta.textContent=`missing: ${{missing}}`;
+          header.appendChild(title); header.appendChild(meta);
+
+          const canvasWrap=document.createElement('div'); canvasWrap.className='canvas-wrap';
+          const canvas=document.createElement('canvas'); canvasWrap.appendChild(canvas);
+
+          const footer=document.createElement('div'); footer.className='small';
+
+          const numeric=coerceNumericArray(values);
+          if(numeric&&numeric.length){{
+            const hist=makeHistogram(numeric);
+            drawBars(canvas,hist.bins,hist.counts,{{tickFmt:(x)=>{{const num=Number(x);if(!Number.isFinite(num))return'';const s=Math.abs(num)>=1000?(num/1000).toFixed(1)+'k':num.toFixed(2);return s.replace(/\\.00$/,'');}}}});
+            const s=numericSummary(numeric);
+            footer.innerHTML=`<span class="badge">numeric</span> <span class="small">min ${{s.min}}, q1 ${{s.q1}}, med ${{s.median}}, q3 ${{s.q3}}, max ${{s.max}}</span>`;
+          }} else {{
+            const counts=catCounts(values,15);
+            const labels=counts.map(([k,_])=>k==='__OTHER__'?'Other':k);
+            const vals=counts.map(([_,v])=>v);
+            drawBars(canvas,labels,vals,{{tickFmt:(t)=>{{const s=String(t);return s.length>8?s.slice(0,8)+'…':s;}}}});
+            footer.innerHTML=`<span class="badge">categorical</span> <span class="small">${{labels.length}} shown${{counts.length>labels.length?' (top)':''}}</span>`;
+          }}
+
+          card.appendChild(header);
+          card.appendChild(canvasWrap);
+          card.appendChild(footer);
+          categoryCards.appendChild(card);
+        }}
+        
+        categorySection.appendChild(categoryCards);
+        statsCards.appendChild(categorySection);
       }}
     }} catch (e) {{
       console.error('renderStats error:', e);
@@ -551,12 +641,14 @@ HTML_TEMPLATE = """<!doctype html>
   }}
 
   statsScopeSel.addEventListener('change', () => renderStats());
+  categoricalSplitSel.addEventListener('change', () => renderStats());
   window.addEventListener('resize', () => {{ if (isStatsActive()) renderStats(); }});
 
   // ---- Init ----
   window.addEventListener('load', () => {{
     setMetaHidden(document.documentElement.classList.contains('meta-hidden'));
     [...pageSizeSel.options].forEach(o => {{ if (parseInt(o.value,10) === DEFAULT_PAGE_SIZE) o.selected = true; }});
+    populateCategoricalDropdown(DATA);
     applyFilter('');
   }});
 </script>
