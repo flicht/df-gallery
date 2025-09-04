@@ -613,7 +613,8 @@ HTML_TEMPLATE = """<!doctype html>
     ctx.fillStyle='#eaeaea'; ctx.strokeStyle='#2a2d39';
     
     const pad=10*dpr;
-    const x0=pad,y0=H-22*dpr;
+    const leftPad=40*dpr; // Extra space for y-axis labels
+    const x0=leftPad,y0=H-22*dpr;
     const x1=W-pad,y1=pad;
     const n=Math.max(1,labels.length);
     const vmax=Math.max(1,...dataSeries.flatMap(series => series.values),1);
@@ -624,8 +625,39 @@ HTML_TEMPLATE = """<!doctype html>
     const barWidth = Math.max(2*dpr, (groupWidth * 0.8) / numSeries);
     const barSpacing = (groupWidth - barWidth * numSeries) / (numSeries + 1);
     
-    // Draw axis
-    ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(x1,y0); ctx.stroke();
+    // Draw y-axis
+    ctx.strokeStyle = '#2a2d39';
+    ctx.lineWidth = 1 * dpr;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x0, y1);
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y0);
+    ctx.stroke();
+    
+    // Draw y-axis ticks and labels
+    const numTicks = 5;
+    ctx.fillStyle = '#9aa0a6';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    ctx.font = `${{10 * dpr}}px system-ui,-apple-system,Segoe UI,Roboto,Inter,sans-serif`;
+    
+    for (let i = 0; i <= numTicks; i++) {{
+      const value = (vmax * i) / numTicks;
+      const y = y0 - (value / vmax) * (y0 - y1);
+      
+      // Draw tick mark
+      ctx.strokeStyle = '#eaeaea';
+      ctx.lineWidth = 1 * dpr;
+      ctx.beginPath();
+      ctx.moveTo(x0 - 5 * dpr, y);
+      ctx.lineTo(x0, y);
+      ctx.stroke();
+      
+      // Draw tick label
+      const label = formatValue(value);
+      ctx.fillText(label, x0 - 8 * dpr, y);
+    }}
     
     // Color palette for different categories
     const colors = ['#3ea6ff', '#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4', '#feca57', '#ff9ff3', '#54a0ff'];
@@ -647,9 +679,10 @@ HTML_TEMPLATE = """<!doctype html>
       }});
     }}
     
-    // Draw labels
+    // Draw x-axis labels
     const maxLabels=Math.min(10,n); const step=Math.max(1,Math.round(n/maxLabels));
     ctx.fillStyle='#9aa0a6'; ctx.textAlign='center'; ctx.textBaseline='top';
+    ctx.font = `${{12 * dpr}}px system-ui,-apple-system,Segoe UI,Roboto,Inter,sans-serif`;
     for(let i=0;i<n;i+=step){{
       const x=x0+i*groupWidth+groupWidth/2;
       const raw=labels[i]??'';
@@ -746,6 +779,17 @@ HTML_TEMPLATE = """<!doctype html>
     return {{ min, q1, median, q3, max, outliers }};
   }}
 
+  function formatValue(value) {{
+    if (typeof value !== 'number' || !Number.isFinite(value)) return '0';
+    if (Math.abs(value) >= 1000) {{
+      return (value / 1000).toFixed(1) + 'k';
+    }}
+    if (Math.abs(value) >= 1) {{
+      return value.toFixed(1);
+    }}
+    return value.toFixed(2);
+  }}
+
   function drawViolinPlot(canvas, dataSeries, opts = {{}}) {{
     const dpr = window.devicePixelRatio || 1;
     const Wcss = canvas.clientWidth || canvas.parentElement.clientWidth || 320;
@@ -759,7 +803,8 @@ HTML_TEMPLATE = """<!doctype html>
     ctx.font = `${{12 * dpr}}px system-ui,-apple-system,Segoe UI,Roboto,Inter,sans-serif`;
     
     const pad = 20 * dpr;
-    const x0 = pad, y0 = H - 30 * dpr;
+    const leftPad = 60 * dpr; // Extra space for y-axis labels
+    const x0 = leftPad, y0 = H - 30 * dpr;
     const x1 = W - pad, y1 = pad;
     const chartW = x1 - x0;
     const chartH = y0 - y1;
@@ -773,6 +818,15 @@ HTML_TEMPLATE = """<!doctype html>
       const kde = kernelDensityEstimation(series.values);
       return Math.max(...kde.y);
     }}));
+    
+    // Calculate data range for y-axis
+    const allValues = dataSeries.flatMap(series => series.values);
+    const minVal = Math.min(...allValues);
+    const maxVal = Math.max(...allValues);
+    const range = maxVal - minVal;
+    const padding = range > 0 ? range * 0.05 : 1; // 5% padding, or 1 if all values are the same
+    const yMin = minVal - padding;
+    const yMax = maxVal + padding;
     
     // Draw each violin
     dataSeries.forEach((series, seriesIndex) => {{
@@ -795,14 +849,14 @@ HTML_TEMPLATE = """<!doctype html>
       // Right side of violin
       for (let i = 0; i < kde.x.length; i++) {{
         const x = centerX + kde.y[i] * scale;
-        const y = y0 - (kde.x[i] - Math.min(...kde.x)) / (Math.max(...kde.x) - Math.min(...kde.x)) * chartH;
+        const y = y0 - (kde.x[i] - yMin) / (yMax - yMin) * chartH;
         if (i === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       }}
       // Left side of violin
       for (let i = kde.x.length - 1; i >= 0; i--) {{
         const x = centerX - kde.y[i] * scale;
-        const y = y0 - (kde.x[i] - Math.min(...kde.x)) / (Math.max(...kde.x) - Math.min(...kde.x)) * chartH;
+        const y = y0 - (kde.x[i] - yMin) / (yMax - yMin) * chartH;
         ctx.lineTo(x, y);
       }}
       ctx.closePath();
@@ -810,8 +864,8 @@ HTML_TEMPLATE = """<!doctype html>
       ctx.stroke();
       
       // Draw box plot inside violin
-      const boxY = y0 - (boxStats.median - Math.min(...kde.x)) / (Math.max(...kde.x) - Math.min(...kde.x)) * chartH;
-      const boxH = Math.max(4 * dpr, (boxStats.q3 - boxStats.q1) / (Math.max(...kde.x) - Math.min(...kde.x)) * chartH);
+      const boxY = y0 - (boxStats.median - yMin) / (yMax - yMin) * chartH;
+      const boxH = Math.max(4 * dpr, (boxStats.q3 - boxStats.q1) / (yMax - yMin) * chartH);
       
       // Box
       ctx.fillStyle = '#ffffff';
@@ -829,8 +883,8 @@ HTML_TEMPLATE = """<!doctype html>
       ctx.stroke();
       
       // Whiskers
-      const whiskerY1 = y0 - (boxStats.min - Math.min(...kde.x)) / (Math.max(...kde.x) - Math.min(...kde.x)) * chartH;
-      const whiskerY2 = y0 - (boxStats.max - Math.min(...kde.x)) / (Math.max(...kde.x) - Math.min(...kde.x)) * chartH;
+      const whiskerY1 = y0 - (boxStats.min - yMin) / (yMax - yMin) * chartH;
+      const whiskerY2 = y0 - (boxStats.max - yMin) / (yMax - yMin) * chartH;
       
       ctx.strokeStyle = color;
       ctx.lineWidth = 2 * dpr;
@@ -849,7 +903,7 @@ HTML_TEMPLATE = """<!doctype html>
       if (boxStats.outliers.length > 0) {{
         ctx.fillStyle = color;
         boxStats.outliers.forEach(outlier => {{
-          const outlierY = y0 - (outlier - Math.min(...kde.x)) / (Math.max(...kde.x) - Math.min(...kde.x)) * chartH;
+          const outlierY = y0 - (outlier - yMin) / (yMax - yMin) * chartH;
           ctx.beginPath();
           ctx.arc(centerX, outlierY, 2 * dpr, 0, 2 * Math.PI);
           ctx.fill();
@@ -857,18 +911,45 @@ HTML_TEMPLATE = """<!doctype html>
       }}
     }});
     
-    // Draw axis
+    // Draw y-axis
     ctx.strokeStyle = '#2a2d39';
     ctx.lineWidth = 1 * dpr;
     ctx.beginPath();
     ctx.moveTo(x0, y0);
+    ctx.lineTo(x0, y1);
+    ctx.moveTo(x0, y0);
     ctx.lineTo(x1, y0);
     ctx.stroke();
+    
+    // Draw y-axis ticks and labels
+    const numTicks = 5;
+    ctx.fillStyle = '#9aa0a6';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    ctx.font = `${{10 * dpr}}px system-ui,-apple-system,Segoe UI,Roboto,Inter,sans-serif`;
+    
+    for (let i = 0; i <= numTicks; i++) {{
+      const value = yMin + (yMax - yMin) * (i / numTicks);
+      const y = y0 - (value - yMin) / (yMax - yMin) * chartH;
+      
+      // Draw tick mark
+      ctx.strokeStyle = '#eaeaea';
+      ctx.lineWidth = 1 * dpr;
+      ctx.beginPath();
+      ctx.moveTo(x0 - 5 * dpr, y);
+      ctx.lineTo(x0, y);
+      ctx.stroke();
+      
+      // Draw tick label
+      const label = formatValue(value);
+      ctx.fillText(label, x0 - 8 * dpr, y);
+    }}
     
     // Draw category labels
     ctx.fillStyle = '#9aa0a6';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
+    ctx.font = `${{12 * dpr}}px system-ui,-apple-system,Segoe UI,Roboto,Inter,sans-serif`;
     dataSeries.forEach((series, seriesIndex) => {{
       const centerX = x0 + (seriesIndex + 0.5) * violinWidth;
       const label = series.name.length > 12 ? series.name.slice(0, 12) + '...' : series.name;
