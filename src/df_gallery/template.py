@@ -555,6 +555,327 @@ HTML_TEMPLATE = """<!doctype html>
     for(let i=0;i<n;i+=step){{const x=x0+i*bw+bw/2;const raw=labels[i]??'';const txt=(opts.tickFmt?opts.tickFmt(raw):String(raw));ctx.fillText(txt,x,y0+4*dpr);}}
   }}
 
+  function drawOverlayBars(canvas,labels,dataSeries,opts={{}}){{
+    const dpr=window.devicePixelRatio||1;
+    const Wcss=canvas.clientWidth||canvas.parentElement.clientWidth||320;
+    const Hcss=canvas.clientHeight||canvas.parentElement.clientHeight||220;
+    const W=Math.max(10,Math.floor(Wcss*dpr));
+    const H=Math.max(10,Math.floor(Hcss*dpr));
+    canvas.width=W; canvas.height=H;
+    const ctx=canvas.getContext('2d');
+    ctx.clearRect(0,0,W,H);
+    ctx.font=`${{12*dpr}}px system-ui,-apple-system,Segoe UI,Roboto,Inter,sans-serif`;
+    ctx.fillStyle='#eaeaea'; ctx.strokeStyle='#2a2d39';
+    
+    const pad=10*dpr;
+    const x0=pad,y0=H-22*dpr;
+    const x1=W-pad,y1=pad;
+    const n=Math.max(1,labels.length);
+    const vmax=Math.max(1,...dataSeries.flatMap(series => series.values),1);
+    const bw=(x1-x0)/n;
+    
+    // Draw axis
+    ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(x1,y0); ctx.stroke();
+    
+    // Color palette for different categories
+    const colors = ['#3ea6ff', '#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4', '#feca57', '#ff9ff3', '#54a0ff'];
+    
+    // Draw bars for each data series
+    dataSeries.forEach((series, seriesIndex) => {{
+      const color = colors[seriesIndex % colors.length];
+      ctx.fillStyle = color;
+      
+      for(let i=0;i<n;i++){{
+        const v=series.values[i]||0;
+        const h=(v/vmax)*(y0-y1);
+        const x=x0+i*bw+1*dpr;
+        const y=y0-h;
+        ctx.fillRect(x,y,Math.max(1*dpr,bw-2*dpr),h);
+      }}
+    }});
+    
+    // Draw labels
+    const maxLabels=Math.min(10,n); const step=Math.max(1,Math.round(n/maxLabels));
+    ctx.fillStyle='#9aa0a6'; ctx.textAlign='center'; ctx.textBaseline='top';
+    for(let i=0;i<n;i+=step){{const x=x0+i*bw+bw/2;const raw=labels[i]??'';const txt=(opts.tickFmt?opts.tickFmt(raw):String(raw));ctx.fillText(txt,x,y0+4*dpr);}}
+  }}
+
+  function drawGroupedBars(canvas,labels,dataSeries,opts={{}}){{
+    const dpr=window.devicePixelRatio||1;
+    const Wcss=canvas.clientWidth||canvas.parentElement.clientWidth||320;
+    const Hcss=canvas.clientHeight||canvas.parentElement.clientHeight||220;
+    const W=Math.max(10,Math.floor(Wcss*dpr));
+    const H=Math.max(10,Math.floor(Hcss*dpr));
+    canvas.width=W; canvas.height=H;
+    const ctx=canvas.getContext('2d');
+    ctx.clearRect(0,0,W,H);
+    ctx.font=`${{12*dpr}}px system-ui,-apple-system,Segoe UI,Roboto,Inter,sans-serif`;
+    ctx.fillStyle='#eaeaea'; ctx.strokeStyle='#2a2d39';
+    
+    const pad=10*dpr;
+    const x0=pad,y0=H-22*dpr;
+    const x1=W-pad,y1=pad;
+    const n=Math.max(1,labels.length);
+    const vmax=Math.max(1,...dataSeries.flatMap(series => series.values),1);
+    
+    // Calculate bar dimensions for grouped bars
+    const numSeries = dataSeries.length;
+    const groupWidth = (x1 - x0) / n;
+    const barWidth = Math.max(2*dpr, (groupWidth * 0.8) / numSeries);
+    const barSpacing = (groupWidth - barWidth * numSeries) / (numSeries + 1);
+    
+    // Draw axis
+    ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(x1,y0); ctx.stroke();
+    
+    // Color palette for different categories
+    const colors = ['#3ea6ff', '#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4', '#feca57', '#ff9ff3', '#54a0ff'];
+    
+    // Draw grouped bars
+    for(let i=0;i<n;i++){{
+      const groupX = x0 + i * groupWidth;
+      
+      dataSeries.forEach((series, seriesIndex) => {{
+        const color = colors[seriesIndex % colors.length];
+        ctx.fillStyle = color;
+        
+        const v = series.values[i] || 0;
+        const h = (v/vmax) * (y0 - y1);
+        const x = groupX + barSpacing + seriesIndex * (barWidth + barSpacing);
+        const y = y0 - h;
+        
+        ctx.fillRect(x, y, barWidth, h);
+      }});
+    }}
+    
+    // Draw labels
+    const maxLabels=Math.min(10,n); const step=Math.max(1,Math.round(n/maxLabels));
+    ctx.fillStyle='#9aa0a6'; ctx.textAlign='center'; ctx.textBaseline='top';
+    for(let i=0;i<n;i+=step){{
+      const x=x0+i*groupWidth+groupWidth/2;
+      const raw=labels[i]??'';
+      const txt=(opts.tickFmt?opts.tickFmt(raw):String(raw));
+      ctx.fillText(txt,x,y0+4*dpr);
+    }}
+  }}
+
+  function createLegend(categories, colors) {{
+    const legend = document.createElement('div');
+    legend.style.display = 'flex';
+    legend.style.flexWrap = 'wrap';
+    legend.style.gap = '12px';
+    legend.style.marginTop = '8px';
+    legend.style.fontSize = '12px';
+    
+    categories.forEach((category, index) => {{
+      const item = document.createElement('div');
+      item.style.display = 'flex';
+      item.style.alignItems = 'center';
+      item.style.gap = '6px';
+      
+      const colorBox = document.createElement('div');
+      colorBox.style.width = '12px';
+      colorBox.style.height = '12px';
+      colorBox.style.backgroundColor = colors[index % colors.length];
+      colorBox.style.borderRadius = '2px';
+      
+      const label = document.createElement('span');
+      label.textContent = category;
+      label.style.color = '#9aa0a6';
+      
+      item.appendChild(colorBox);
+      item.appendChild(label);
+      legend.appendChild(item);
+    }});
+    
+    return legend;
+  }}
+
+  function kernelDensityEstimation(data, bandwidth = null) {{
+    if (data.length === 0) return {{ x: [], y: [] }};
+    
+    const sorted = [...data].sort((a, b) => a - b);
+    const min = sorted[0];
+    const max = sorted[sorted.length - 1];
+    const range = max - min;
+    
+    // Use Silverman's rule of thumb for bandwidth if not provided
+    if (!bandwidth) {{
+      const std = Math.sqrt(data.reduce((sum, x) => sum + Math.pow(x - data.reduce((a, b) => a + b) / data.length, 2), 0) / data.length);
+      bandwidth = 1.06 * std * Math.pow(data.length, -0.2);
+    }}
+    
+    const n = 100;
+    const x = [];
+    const y = [];
+    
+    for (let i = 0; i <= n; i++) {{
+      const xi = min + (range * i) / n;
+      let density = 0;
+      
+      for (const point of data) {{
+        const u = (xi - point) / bandwidth;
+        density += Math.exp(-0.5 * u * u) / Math.sqrt(2 * Math.PI);
+      }}
+      
+      density /= (data.length * bandwidth);
+      x.push(xi);
+      y.push(density);
+    }}
+    
+    return {{ x, y }};
+  }}
+
+  function calculateBoxPlotStats(data) {{
+    if (data.length === 0) return {{ min: 0, q1: 0, median: 0, q3: 0, max: 0, outliers: [] }};
+    
+    const sorted = [...data].sort((a, b) => a - b);
+    const n = sorted.length;
+    
+    const q1 = sorted[Math.floor(n * 0.25)];
+    const median = sorted[Math.floor(n * 0.5)];
+    const q3 = sorted[Math.floor(n * 0.75)];
+    
+    const iqr = q3 - q1;
+    const lowerFence = q1 - 1.5 * iqr;
+    const upperFence = q3 + 1.5 * iqr;
+    
+    const outliers = sorted.filter(x => x < lowerFence || x > upperFence);
+    const min = Math.max(sorted[0], lowerFence);
+    const max = Math.min(sorted[n - 1], upperFence);
+    
+    return {{ min, q1, median, q3, max, outliers }};
+  }}
+
+  function drawViolinPlot(canvas, dataSeries, opts = {{}}) {{
+    const dpr = window.devicePixelRatio || 1;
+    const Wcss = canvas.clientWidth || canvas.parentElement.clientWidth || 320;
+    const Hcss = canvas.clientHeight || canvas.parentElement.clientHeight || 220;
+    const W = Math.max(10, Math.floor(Wcss * dpr));
+    const H = Math.max(10, Math.floor(Hcss * dpr));
+    canvas.width = W; canvas.height = H;
+    
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, W, H);
+    ctx.font = `${{12 * dpr}}px system-ui,-apple-system,Segoe UI,Roboto,Inter,sans-serif`;
+    
+    const pad = 20 * dpr;
+    const x0 = pad, y0 = H - 30 * dpr;
+    const x1 = W - pad, y1 = pad;
+    const chartW = x1 - x0;
+    const chartH = y0 - y1;
+    
+    // Colors
+    const colors = ['#3ea6ff', '#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4', '#feca57', '#ff9ff3', '#54a0ff'];
+    
+    // Calculate violin width per category
+    const violinWidth = chartW / dataSeries.length;
+    const maxDensity = Math.max(...dataSeries.map(series => {{
+      const kde = kernelDensityEstimation(series.values);
+      return Math.max(...kde.y);
+    }}));
+    
+    // Draw each violin
+    dataSeries.forEach((series, seriesIndex) => {{
+      if (series.values.length === 0) return;
+      
+      const color = colors[seriesIndex % colors.length];
+      const centerX = x0 + (seriesIndex + 0.5) * violinWidth;
+      const kde = kernelDensityEstimation(series.values);
+      const boxStats = calculateBoxPlotStats(series.values);
+      
+      // Scale density to violin width
+      const scale = (violinWidth * 0.4) / maxDensity;
+      
+      // Draw violin outline
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color + '20'; // 20% opacity
+      ctx.lineWidth = 2 * dpr;
+      
+      ctx.beginPath();
+      // Right side of violin
+      for (let i = 0; i < kde.x.length; i++) {{
+        const x = centerX + kde.y[i] * scale;
+        const y = y0 - (kde.x[i] - Math.min(...kde.x)) / (Math.max(...kde.x) - Math.min(...kde.x)) * chartH;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }}
+      // Left side of violin
+      for (let i = kde.x.length - 1; i >= 0; i--) {{
+        const x = centerX - kde.y[i] * scale;
+        const y = y0 - (kde.x[i] - Math.min(...kde.x)) / (Math.max(...kde.x) - Math.min(...kde.x)) * chartH;
+        ctx.lineTo(x, y);
+      }}
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      
+      // Draw box plot inside violin
+      const boxY = y0 - (boxStats.median - Math.min(...kde.x)) / (Math.max(...kde.x) - Math.min(...kde.x)) * chartH;
+      const boxH = Math.max(4 * dpr, (boxStats.q3 - boxStats.q1) / (Math.max(...kde.x) - Math.min(...kde.x)) * chartH);
+      
+      // Box
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(centerX - 8 * dpr, boxY - boxH/2, 16 * dpr, boxH);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2 * dpr;
+      ctx.strokeRect(centerX - 8 * dpr, boxY - boxH/2, 16 * dpr, boxH);
+      
+      // Median line
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3 * dpr;
+      ctx.beginPath();
+      ctx.moveTo(centerX - 8 * dpr, boxY);
+      ctx.lineTo(centerX + 8 * dpr, boxY);
+      ctx.stroke();
+      
+      // Whiskers
+      const whiskerY1 = y0 - (boxStats.min - Math.min(...kde.x)) / (Math.max(...kde.x) - Math.min(...kde.x)) * chartH;
+      const whiskerY2 = y0 - (boxStats.max - Math.min(...kde.x)) / (Math.max(...kde.x) - Math.min(...kde.x)) * chartH;
+      
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2 * dpr;
+      ctx.beginPath();
+      ctx.moveTo(centerX, boxY - boxH/2);
+      ctx.lineTo(centerX, whiskerY1);
+      ctx.moveTo(centerX - 4 * dpr, whiskerY1);
+      ctx.lineTo(centerX + 4 * dpr, whiskerY1);
+      ctx.moveTo(centerX, boxY + boxH/2);
+      ctx.lineTo(centerX, whiskerY2);
+      ctx.moveTo(centerX - 4 * dpr, whiskerY2);
+      ctx.lineTo(centerX + 4 * dpr, whiskerY2);
+      ctx.stroke();
+      
+      // Outliers
+      if (boxStats.outliers.length > 0) {{
+        ctx.fillStyle = color;
+        boxStats.outliers.forEach(outlier => {{
+          const outlierY = y0 - (outlier - Math.min(...kde.x)) / (Math.max(...kde.x) - Math.min(...kde.x)) * chartH;
+          ctx.beginPath();
+          ctx.arc(centerX, outlierY, 2 * dpr, 0, 2 * Math.PI);
+          ctx.fill();
+        }});
+      }}
+    }});
+    
+    // Draw axis
+    ctx.strokeStyle = '#2a2d39';
+    ctx.lineWidth = 1 * dpr;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y0);
+    ctx.stroke();
+    
+    // Draw category labels
+    ctx.fillStyle = '#9aa0a6';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    dataSeries.forEach((series, seriesIndex) => {{
+      const centerX = x0 + (seriesIndex + 0.5) * violinWidth;
+      const label = series.name.length > 12 ? series.name.slice(0, 12) + '...' : series.name;
+      ctx.fillText(label, centerX, y0 + 8 * dpr);
+    }});
+  }}
+
   function renderStats(){{
     try{{
       const scope=(statsScopeSel.value==='filtered')?filtered:DATA;
@@ -569,65 +890,91 @@ HTML_TEMPLATE = """<!doctype html>
       // Group data by category if a category column is selected
       const groups = groupByCategory(rows, categoryCol);
       const groupNames = Object.keys(groups).sort();
+      const colors = ['#3ea6ff', '#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4', '#feca57', '#ff9ff3', '#54a0ff'];
 
-      for(const groupName of groupNames){{
-        const groupRows = groups[groupName];
-        const groupCount = groupRows.length;
-        
-        // Create category section
-        const categorySection = document.createElement('div');
-        categorySection.className = 'category-section';
-        
-        // Add category header if we have multiple groups
-        if(groupNames.length > 1){{
-          const categoryHeader = document.createElement('div');
-          categoryHeader.className = 'category-header';
-          categoryHeader.textContent = `${{groupName}} (${{groupCount}} items)`;
-          categorySection.appendChild(categoryHeader);
-        }}
-        
-        // Create cards container for this category
-        const categoryCards = document.createElement('div');
-        categoryCards.className = groupNames.length > 1 ? 'category-cards' : 'cards';
-        
-        // Generate charts for each column in this category
-        for(const col of cols){{
-          const{{values,missing}}=valuesFor(col,groupRows);
-          const card=document.createElement('div'); card.className='card';
+      // Generate charts for each column
+      for(const col of cols){{
+        const card=document.createElement('div'); 
+        card.className='card';
 
-          const header=document.createElement('div');
-          header.style.display='flex'; header.style.justifyContent='space-between'; header.style.alignItems='baseline';
-          const title=document.createElement('h3'); title.textContent=col;
-          const meta=document.createElement('span'); meta.className='small'; meta.textContent=`missing: ${{missing}}`;
-          header.appendChild(title); header.appendChild(meta);
+        const header=document.createElement('div');
+        header.style.display='flex'; 
+        header.style.justifyContent='space-between'; 
+        header.style.alignItems='baseline';
+        const title=document.createElement('h3'); 
+        title.textContent=col;
+        const meta=document.createElement('span'); 
+        meta.className='small'; 
+        meta.textContent=`missing: ${{rows.filter(r => !(col in r) || r[col]==null || r[col]==='').length}}`;
+        header.appendChild(title); 
+        header.appendChild(meta);
 
-          const canvasWrap=document.createElement('div'); canvasWrap.className='canvas-wrap';
-          const canvas=document.createElement('canvas'); canvasWrap.appendChild(canvas);
+        const canvasWrap=document.createElement('div'); 
+        canvasWrap.className='canvas-wrap';
+        const canvas=document.createElement('canvas'); 
+        canvasWrap.appendChild(canvas);
 
-          const footer=document.createElement('div'); footer.className='small';
+        const footer=document.createElement('div'); 
+        footer.className='small';
 
-          const numeric=coerceNumericArray(values);
-          if(numeric&&numeric.length){{
-            const hist=makeHistogram(numeric);
-            drawBars(canvas,hist.bins,hist.counts,{{tickFmt:(x)=>{{const num=Number(x);if(!Number.isFinite(num))return'';const s=Math.abs(num)>=1000?(num/1000).toFixed(1)+'k':num.toFixed(2);return s.replace(/\\.00$/,'');}}}});
-            const s=numericSummary(numeric);
-            footer.innerHTML=`<span class="badge">numeric</span> <span class="small">min ${{s.min}}, q1 ${{s.q1}}, med ${{s.median}}, q3 ${{s.q3}}, max ${{s.max}}</span>`;
+        if(categoryCol && groupNames.length > 1){{
+          // Create overlay chart for multiple categories
+          const dataSeries = groupNames.map(groupName => {{
+            const groupRows = groups[groupName];
+            const {{values}} = valuesFor(col, groupRows);
+            return {{ name: groupName, values }};
+          }});
+
+          const numeric = coerceNumericArray(dataSeries.flatMap(series => series.values));
+          if(numeric && numeric.length){{
+            // Numeric data - create violin plots
+            drawViolinPlot(canvas, dataSeries);
+            footer.innerHTML=`<span class="badge">numeric (violin)</span> <span class="small">${{groupNames.length}} categories</span>`;
           }} else {{
-            const counts=catCounts(values,15);
-            const labels=counts.map(([k,_])=>k==='__OTHER__'?'Other':k);
-            const vals=counts.map(([_,v])=>v);
-            drawBars(canvas,labels,vals,{{tickFmt:(t)=>{{const s=String(t);return s.length>8?s.slice(0,8)+'…':s;}}}});
-            footer.innerHTML=`<span class="badge">categorical</span> <span class="small">${{labels.length}} shown${{counts.length>labels.length?' (top)':''}}</span>`;
+            // Categorical data - create grouped bar chart
+            const allValues = dataSeries.flatMap(series => series.values);
+            const allCounts = catCounts(allValues, 15);
+            const labels = allCounts.map(([k,_])=>k==='__OTHER__'?'Other':k);
+            
+            const seriesData = dataSeries.map(series => {{
+              const seriesCounts = catCounts(series.values, 15);
+              const alignedCounts = allCounts.map(([key, _]) => {{
+                const found = seriesCounts.find(([k, _]) => k === key);
+                return found ? found[1] : 0;
+              }});
+              return {{ name: series.name, values: alignedCounts }};
+            }});
+            
+            drawGroupedBars(canvas, labels, seriesData, {{tickFmt:(t)=>{{const s=String(t);return s.length>8?s.slice(0,8)+'…':s;}}}});
+            footer.innerHTML=`<span class="badge">categorical (grouped)</span> <span class="small">${{groupNames.length}} categories</span>`;
           }}
 
-          card.appendChild(header);
-          card.appendChild(canvasWrap);
-          card.appendChild(footer);
-          categoryCards.appendChild(card);
+          // Add legend
+          const legend = createLegend(groupNames, colors);
+          footer.appendChild(legend);
+        }} else {{
+          // Single category or no category - use original single chart
+          const {{values, missing}} = valuesFor(col, rows);
+          const numeric = coerceNumericArray(values);
+          
+          if(numeric && numeric.length){{
+            const hist = makeHistogram(numeric);
+            drawBars(canvas, hist.bins, hist.counts, {{tickFmt:(x)=>{{const num=Number(x);if(!Number.isFinite(num))return'';const s=Math.abs(num)>=1000?(num/1000).toFixed(1)+'k':num.toFixed(2);return s.replace(/\\.00$/,'');}}}});
+            const s = numericSummary(numeric);
+            footer.innerHTML=`<span class="badge">numeric</span> <span class="small">min ${{s.min}}, q1 ${{s.q1}}, med ${{s.median}}, q3 ${{s.q3}}, max ${{s.max}}</span>`;
+          }} else {{
+            const counts = catCounts(values, 15);
+            const labels = counts.map(([k,_])=>k==='__OTHER__'?'Other':k);
+            const vals = counts.map(([_,v])=>v);
+            drawBars(canvas, labels, vals, {{tickFmt:(t)=>{{const s=String(t);return s.length>8?s.slice(0,8)+'…':s;}}}});
+            footer.innerHTML=`<span class="badge">categorical</span> <span class="small">${{labels.length}} shown${{counts.length>labels.length?' (top)':''}}</span>`;
+          }}
         }}
-        
-        categorySection.appendChild(categoryCards);
-        statsCards.appendChild(categorySection);
+
+        card.appendChild(header);
+        card.appendChild(canvasWrap);
+        card.appendChild(footer);
+        statsCards.appendChild(card);
       }}
     }} catch (e) {{
       console.error('renderStats error:', e);
