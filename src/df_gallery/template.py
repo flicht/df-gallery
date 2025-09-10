@@ -112,6 +112,25 @@ HTML_TEMPLATE = """<!doctype html>
   .canvas-wrap canvas {{ width:100%; height:100%; display:block; }}
   .badge {{ background:#0e0f12; border:1px solid #2a2d39; border-radius: 999px; padding:2px 8px; font-size:11px; color: var(--muted); }}
 
+  /* Tooltip styles */
+  .tooltip {{
+    position: absolute;
+    background: var(--card);
+    border: 1px solid #2a2d39;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+    color: var(--fg);
+    pointer-events: none;
+    z-index: 1000;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    opacity: 0;
+    transition: opacity 0.2s ease;
+  }}
+  .tooltip.show {{ opacity: 1; }}
+  .tooltip .tooltip-title {{ font-weight: 600; margin-bottom: 4px; color: var(--accent); }}
+  .tooltip .tooltip-content {{ line-height: 1.4; }}
+
   /* Category sections */
   .category-section {{ margin-bottom: 24px; }}
   .category-header {{ 
@@ -193,6 +212,15 @@ HTML_TEMPLATE = """<!doctype html>
         <select id="categorical-split">
           <option value="">None</option>
         </select>
+        <label class="hint">Chart type:</label>
+        <select id="chart-type">
+          <option value="auto" selected>Auto</option>
+          <option value="histogram">Histogram</option>
+          <option value="bar">Bar Chart</option>
+          <option value="violin">Violin Plot</option>
+          <option value="scatter">Scatter Plot</option>
+        </select>
+        <button id="clear-cache" style="font-size: 11px; padding: 4px 8px;">Clear Cache</button>
         <span class="small" id="stats-summary"></span>
       </div>
       <div id="stats-cards" class="cards"></div>
@@ -229,6 +257,8 @@ HTML_TEMPLATE = """<!doctype html>
   // Stats elements
   const statsScopeSel = document.getElementById('stats-scope');
   const categoricalSplitSel = document.getElementById('categorical-split');
+  const chartTypeSel = document.getElementById('chart-type');
+  const clearCacheBtn = document.getElementById('clear-cache');
   const statsCards = document.getElementById('stats-cards');
   const statsSummary = document.getElementById('stats-summary');
 
@@ -790,6 +820,111 @@ HTML_TEMPLATE = """<!doctype html>
     return value.toFixed(2);
   }}
 
+  function drawScatterPlot(canvas, dataSeries, opts = {{}}) {{
+    const dpr = window.devicePixelRatio || 1;
+    const Wcss = canvas.clientWidth || canvas.parentElement.clientWidth || 320;
+    const Hcss = canvas.clientHeight || canvas.parentElement.clientHeight || 220;
+    const W = Math.max(10, Math.floor(Wcss * dpr));
+    const H = Math.max(10, Math.floor(Hcss * dpr));
+    canvas.width = W; canvas.height = H;
+    
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, W, H);
+    ctx.font = `${{12 * dpr}}px system-ui,-apple-system,Segoe UI,Roboto,Inter,sans-serif`;
+    
+    const pad = 20 * dpr;
+    const leftPad = 60 * dpr;
+    const x0 = leftPad, y0 = H - 30 * dpr;
+    const x1 = W - pad, y1 = pad;
+    const chartW = x1 - x0;
+    const chartH = y0 - y1;
+    
+    // Colors
+    const colors = ['#3ea6ff', '#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4', '#feca57', '#ff9ff3', '#54a0ff'];
+    
+    // Calculate data ranges
+    const allValues = dataSeries.flatMap(series => series.values);
+    const xValues = allValues.map(v => v.x || v[0] || 0);
+    const yValues = allValues.map(v => v.y || v[1] || 0);
+    const xMin = Math.min(...xValues);
+    const xMax = Math.max(...xValues);
+    const yMin = Math.min(...yValues);
+    const yMax = Math.max(...yValues);
+    const xRange = xMax - xMin || 1;
+    const yRange = yMax - yMin || 1;
+    
+    // Draw axes
+    ctx.strokeStyle = '#2a2d39';
+    ctx.lineWidth = 1 * dpr;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x0, y1);
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y0);
+    ctx.stroke();
+    
+    // Draw points for each series
+    dataSeries.forEach((series, seriesIndex) => {{
+      if (series.values.length === 0) return;
+      
+      const color = colors[seriesIndex % colors.length];
+      ctx.fillStyle = color + '80'; // 50% opacity
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1 * dpr;
+      
+      series.values.forEach(point => {{
+        const x = x0 + ((point.x || point[0] || 0) - xMin) / xRange * chartW;
+        const y = y0 - ((point.y || point[1] || 0) - yMin) / yRange * chartH;
+        
+        ctx.beginPath();
+        ctx.arc(x, y, 3 * dpr, 0, 2 * Math.PI);
+        ctx.fill();
+        ctx.stroke();
+      }});
+    }});
+    
+    // Draw axis labels
+    const numTicks = 5;
+    ctx.fillStyle = '#9aa0a6';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    ctx.font = `${{10 * dpr}}px system-ui,-apple-system,Segoe UI,Roboto,Inter,sans-serif`;
+    
+    // Y-axis labels
+    for (let i = 0; i <= numTicks; i++) {{
+      const value = yMin + (yMax - yMin) * (i / numTicks);
+      const y = y0 - (value - yMin) / yRange * chartH;
+      
+      ctx.strokeStyle = '#eaeaea';
+      ctx.lineWidth = 1 * dpr;
+      ctx.beginPath();
+      ctx.moveTo(x0 - 5 * dpr, y);
+      ctx.lineTo(x0, y);
+      ctx.stroke();
+      
+      const label = formatValue(value);
+      ctx.fillText(label, x0 - 8 * dpr, y);
+    }}
+    
+    // X-axis labels
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    for (let i = 0; i <= numTicks; i++) {{
+      const value = xMin + (xMax - xMin) * (i / numTicks);
+      const x = x0 + (value - xMin) / xRange * chartW;
+      
+      ctx.strokeStyle = '#eaeaea';
+      ctx.lineWidth = 1 * dpr;
+      ctx.beginPath();
+      ctx.moveTo(x, y0);
+      ctx.lineTo(x, y0 + 5 * dpr);
+      ctx.stroke();
+      
+      const label = formatValue(value);
+      ctx.fillText(label, x, y0 + 8 * dpr);
+    }}
+  }}
+
   function drawViolinPlot(canvas, dataSeries, opts = {{}}) {{
     const dpr = window.devicePixelRatio || 1;
     const Wcss = canvas.clientWidth || canvas.parentElement.clientWidth || 320;
@@ -957,6 +1092,209 @@ HTML_TEMPLATE = """<!doctype html>
     }});
   }}
 
+  // Performance constants
+  const MAX_SAMPLE_SIZE = 10000; // Maximum rows to process for charts
+  const CHART_RENDER_TIMEOUT = 100; // ms between chart renders to prevent blocking
+  
+  // Caching for computed statistics
+  const statsCache = new Map();
+  const CACHE_EXPIRY = 30000; // 30 seconds
+  
+  function sampleData(rows, maxSize = MAX_SAMPLE_SIZE) {{
+    if (rows.length <= maxSize) return rows;
+    
+    // Stratified sampling to maintain distribution
+    const step = Math.floor(rows.length / maxSize);
+    const sampled = [];
+    for (let i = 0; i < rows.length; i += step) {{
+      if (sampled.length >= maxSize) break;
+      sampled.push(rows[i]);
+    }}
+    
+    // Add some randomness to avoid bias
+    const remaining = rows.length - sampled.length;
+    if (remaining > 0) {{
+      const randomIndices = new Set();
+      while (randomIndices.size < Math.min(100, remaining)) {{
+        randomIndices.add(Math.floor(Math.random() * rows.length));
+      }}
+      for (const idx of randomIndices) {{
+        if (!sampled.includes(rows[idx])) {{
+          sampled.push(rows[idx]);
+        }}
+      }}
+    }}
+    
+    return sampled;
+  }}
+
+  function getCachedStats(key, computeFn) {{
+    const cached = statsCache.get(key);
+    if (cached && Date.now() - cached.timestamp < CACHE_EXPIRY) {{
+      return cached.data;
+    }}
+    
+    const data = computeFn();
+    statsCache.set(key, {{ data, timestamp: Date.now() }});
+    return data;
+  }}
+
+  function clearStatsCache() {{
+    statsCache.clear();
+  }}
+
+  // Tooltip functionality
+  function createTooltip() {{
+    const tooltip = document.createElement('div');
+    tooltip.className = 'tooltip';
+    tooltip.style.display = 'none';
+    document.body.appendChild(tooltip);
+    return tooltip;
+  }}
+
+  function showTooltip(tooltip, x, y, title, content) {{
+    tooltip.innerHTML = `
+      <div class="tooltip-title">${{title}}</div>
+      <div class="tooltip-content">${{content}}</div>
+    `;
+    tooltip.style.left = x + 'px';
+    tooltip.style.top = y + 'px';
+    tooltip.style.display = 'block';
+    tooltip.classList.add('show');
+  }}
+
+  function hideTooltip(tooltip) {{
+    tooltip.classList.remove('show');
+    setTimeout(() => {{
+      tooltip.style.display = 'none';
+    }}, 200);
+  }}
+
+  function addTooltipToCanvas(canvas, tooltip, data) {{
+    canvas.addEventListener('mousemove', (e) => {{
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      
+      // Find the closest data point
+      const closest = findClosestDataPoint(data, x, y, canvas);
+      if (closest) {{
+        showTooltip(tooltip, e.clientX + 10, e.clientY - 10, closest.title, closest.content);
+      }} else {{
+        hideTooltip(tooltip);
+      }}
+    }});
+    
+    canvas.addEventListener('mouseleave', () => {{
+      hideTooltip(tooltip);
+    }});
+  }}
+
+  function findClosestDataPoint(data, x, y, canvas) {{
+    // This is a simplified version - in practice, you'd need to implement
+    // proper hit testing based on the chart type and data
+    if (data && data.length > 0) {{
+      const rect = canvas.getBoundingClientRect();
+      const relativeX = x / rect.width;
+      const relativeY = y / rect.height;
+      
+      // Simple approximation - you'd want to implement proper hit testing
+      if (relativeX > 0.1 && relativeX < 0.9 && relativeY > 0.1 && relativeY < 0.9) {{
+        const index = Math.floor(relativeX * data.length);
+        if (data[index]) {{
+          return {{
+            title: `Data Point ${{index + 1}}`,
+            content: `Value: ${{data[index]}}`
+          }};
+        }}
+      }}
+    }}
+    return null;
+  }}
+
+  // Export functionality
+  function exportChartAsImage(canvas, filename) {{
+    const link = document.createElement('a');
+    link.download = filename || 'chart.png';
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+  }}
+
+  function exportChartAsSVG(canvas, filename) {{
+    // Convert canvas to SVG (simplified version)
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('width', canvas.width);
+    svg.setAttribute('height', canvas.height);
+    
+    const img = document.createElementNS('http://www.w3.org/2000/svg', 'image');
+    img.setAttribute('href', canvas.toDataURL('image/png'));
+    img.setAttribute('width', canvas.width);
+    img.setAttribute('height', canvas.height);
+    svg.appendChild(img);
+    
+    const svgData = new XMLSerializer().serializeToString(svg);
+    const blob = new Blob([svgData], {{ type: 'image/svg+xml' }});
+    const url = URL.createObjectURL(blob);
+    
+    const link = document.createElement('a');
+    link.download = filename || 'chart.svg';
+    link.href = url;
+    link.click();
+    
+    URL.revokeObjectURL(url);
+  }}
+
+  function exportDataAsCSV(data, filename) {{
+    if (!data || data.length === 0) return;
+    
+    const headers = Object.keys(data[0]);
+    const csvContent = [
+      headers.join(','),
+      ...data.map(row => headers.map(header => `"${{row[header] || ''}}"`).join(','))
+    ].join('\\n');
+    
+    const blob = new Blob([csvContent], {{ type: 'text/csv' }});
+    const url = URL.createObjectURL(blob);
+    
+    const link = document.createElement('a');
+    link.download = filename || 'data.csv';
+    link.href = url;
+    link.click();
+    
+    URL.revokeObjectURL(url);
+  }}
+
+  function addExportButtons(card, canvas, data, colName) {{
+    const exportDiv = document.createElement('div');
+    exportDiv.style.marginTop = '8px';
+    exportDiv.style.display = 'flex';
+    exportDiv.style.gap = '8px';
+    
+    const exportPngBtn = document.createElement('button');
+    exportPngBtn.textContent = 'Export PNG';
+    exportPngBtn.style.fontSize = '11px';
+    exportPngBtn.style.padding = '4px 8px';
+    exportPngBtn.addEventListener('click', () => exportChartAsImage(canvas, `${{colName}}_chart.png`));
+    
+    const exportSvgBtn = document.createElement('button');
+    exportSvgBtn.textContent = 'Export SVG';
+    exportSvgBtn.style.fontSize = '11px';
+    exportSvgBtn.style.padding = '4px 8px';
+    exportSvgBtn.addEventListener('click', () => exportChartAsSVG(canvas, `${{colName}}_chart.svg`));
+    
+    const exportDataBtn = document.createElement('button');
+    exportDataBtn.textContent = 'Export Data';
+    exportDataBtn.style.fontSize = '11px';
+    exportDataBtn.style.padding = '4px 8px';
+    exportDataBtn.addEventListener('click', () => exportDataAsCSV(data, `${{colName}}_data.csv`));
+    
+    exportDiv.appendChild(exportPngBtn);
+    exportDiv.appendChild(exportSvgBtn);
+    exportDiv.appendChild(exportDataBtn);
+    
+    card.appendChild(exportDiv);
+  }}
+
   function renderStats(){{
     try{{
       const scope=(statsScopeSel.value==='filtered')?filtered:DATA;
@@ -965,106 +1303,171 @@ HTML_TEMPLATE = """<!doctype html>
       const categoryCol = categoricalSplitSel.value;
       
       statsCards.innerHTML='';
-      statsSummary.textContent=`${{rows.length}} rows • ${{cols.length}} columns`;
-      if(!rows.length||!cols.length) return;
+      
+      // Show sampling info for large datasets with caching
+      const cacheKey = `sample_${{rows.length}}_${{statsScopeSel.value}}_${{categoricalSplitSel.value}}`;
+      const isSampled = rows.length > MAX_SAMPLE_SIZE;
+      const displayRows = getCachedStats(cacheKey, () => isSampled ? sampleData(rows) : rows);
+      const sampleInfo = isSampled ? ` (sampled from ${{rows.length}} rows)` : '';
+      
+      statsSummary.textContent=`${{displayRows.length}} rows • ${{cols.length}} columns${{sampleInfo}}`;
+      if(!displayRows.length||!cols.length) return;
 
       // Group data by category if a category column is selected
-      const groups = groupByCategory(rows, categoryCol);
+      const groups = groupByCategory(displayRows, categoryCol);
       const groupNames = Object.keys(groups).sort();
       const colors = ['#3ea6ff', '#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4', '#feca57', '#ff9ff3', '#54a0ff'];
 
-      // Generate charts for each column
-      for(const col of cols){{
-        const card=document.createElement('div'); 
-        card.className='card';
-
-        const header=document.createElement('div');
-        header.style.display='flex'; 
-        header.style.justifyContent='space-between'; 
-        header.style.alignItems='baseline';
-        const title=document.createElement('h3'); 
-        title.textContent=col;
-        const meta=document.createElement('span'); 
-        meta.className='small'; 
-        meta.textContent=`missing: ${{rows.filter(r => !(col in r) || r[col]==null || r[col]==='').length}}`;
-        header.appendChild(title); 
-        header.appendChild(meta);
-
-        const canvasWrap=document.createElement('div'); 
-        canvasWrap.className='canvas-wrap';
-        const canvas=document.createElement('canvas'); 
-        canvasWrap.appendChild(canvas);
-
-        const footer=document.createElement('div'); 
-        footer.className='small';
-
-        if(categoryCol && groupNames.length > 1){{
-          // Create overlay chart for multiple categories
-          const dataSeries = groupNames.map(groupName => {{
-            const groupRows = groups[groupName];
-            const {{values}} = valuesFor(col, groupRows);
-            return {{ name: groupName, values }};
-          }});
-
-          const numeric = coerceNumericArray(dataSeries.flatMap(series => series.values));
-          if(numeric && numeric.length){{
-            // Numeric data - create violin plots
-            drawViolinPlot(canvas, dataSeries);
-            footer.innerHTML=`<span class="badge">numeric (violin)</span> <span class="small">${{groupNames.length}} categories</span>`;
-          }} else {{
-            // Categorical data - create grouped bar chart
-            const allValues = dataSeries.flatMap(series => series.values);
-            const allCounts = catCounts(allValues, 15);
-            const labels = allCounts.map(([k,_])=>k==='__OTHER__'?'Other':k);
-            
-            const seriesData = dataSeries.map(series => {{
-              const seriesCounts = catCounts(series.values, 15);
-              const alignedCounts = allCounts.map(([key, _]) => {{
-                const found = seriesCounts.find(([k, _]) => k === key);
-                return found ? found[1] : 0;
-              }});
-              return {{ name: series.name, values: alignedCounts }};
-            }});
-            
-            drawGroupedBars(canvas, labels, seriesData, {{tickFmt:(t)=>{{const s=String(t);return s.length>8?s.slice(0,8)+'…':s;}}}});
-            footer.innerHTML=`<span class="badge">categorical (grouped)</span> <span class="small">${{groupNames.length}} categories</span>`;
-          }}
-
-          // Add legend
-          const legend = createLegend(groupNames, colors);
-          footer.appendChild(legend);
-        }} else {{
-          // Single category or no category - use original single chart
-          const {{values, missing}} = valuesFor(col, rows);
-          const numeric = coerceNumericArray(values);
-          
-          if(numeric && numeric.length){{
-            const hist = makeHistogram(numeric);
-            drawBars(canvas, hist.bins, hist.counts, {{tickFmt:(x)=>{{const num=Number(x);if(!Number.isFinite(num))return'';const s=Math.abs(num)>=1000?(num/1000).toFixed(1)+'k':num.toFixed(2);return s.replace(/\\.00$/,'');}}}});
-            const s = numericSummary(numeric);
-            footer.innerHTML=`<span class="badge">numeric</span> <span class="small">min ${{s.min}}, q1 ${{s.q1}}, med ${{s.median}}, q3 ${{s.q3}}, max ${{s.max}}</span>`;
-          }} else {{
-            const counts = catCounts(values, 15);
-            const labels = counts.map(([k,_])=>k==='__OTHER__'?'Other':k);
-            const vals = counts.map(([_,v])=>v);
-            drawBars(canvas, labels, vals, {{tickFmt:(t)=>{{const s=String(t);return s.length>8?s.slice(0,8)+'…':s;}}}});
-            footer.innerHTML=`<span class="badge">categorical</span> <span class="small">${{labels.length}} shown${{counts.length>labels.length?' (top)':''}}</span>`;
-          }}
-        }}
-
-        card.appendChild(header);
-        card.appendChild(canvasWrap);
-        card.appendChild(footer);
+      // Generate charts for each column with progressive loading
+      let chartIndex = 0;
+      function renderNextChart() {{
+        if (chartIndex >= cols.length) return;
+        
+        const col = cols[chartIndex];
+        const card = document.createElement('div'); 
+        card.className = 'card';
+        
+        // Add loading indicator
+        const loadingDiv = document.createElement('div');
+        loadingDiv.innerHTML = '<div style="text-align: center; padding: 20px; color: #9aa0a6;">Rendering chart...</div>';
+        card.appendChild(loadingDiv);
         statsCards.appendChild(card);
+        
+        // Use setTimeout to prevent blocking the UI
+        setTimeout(() => {{
+          try {{
+            renderChartForColumn(col, card, groups, groupNames, colors, displayRows, categoryCol);
+          }} catch (e) {{
+            console.error('Error rendering chart for', col, e);
+            card.innerHTML = `<div class="small">Error rendering chart: ${{String(e)}}</div>`;
+          }}
+          
+          chartIndex++;
+          renderNextChart();
+        }}, CHART_RENDER_TIMEOUT);
       }}
+      
+      renderNextChart();
     }} catch (e) {{
       console.error('renderStats error:', e);
       statsCards.innerHTML = `<div class="small">Error rendering stats: ${{String(e)}}</div>`;
     }}
   }}
 
+  function renderChartForColumn(col, card, groups, groupNames, colors, displayRows, categoryCol) {{
+    // Clear loading indicator
+    card.innerHTML = '';
+    
+    const header = document.createElement('div');
+    header.style.display = 'flex'; 
+    header.style.justifyContent = 'space-between'; 
+    header.style.alignItems = 'baseline';
+    const title = document.createElement('h3'); 
+    title.textContent = col;
+    const meta = document.createElement('span'); 
+    meta.className = 'small'; 
+    meta.textContent = `missing: ${{displayRows.filter(r => !(col in r) || r[col]==null || r[col]==='').length}}`;
+    header.appendChild(title); 
+    header.appendChild(meta);
+
+    const canvasWrap = document.createElement('div'); 
+    canvasWrap.className = 'canvas-wrap';
+    const canvas = document.createElement('canvas'); 
+    canvasWrap.appendChild(canvas);
+    
+    // Add tooltip functionality
+    const tooltip = createTooltip();
+
+    const footer = document.createElement('div'); 
+    footer.className = 'small';
+
+    if(categoryCol && groupNames.length > 1){{
+      // Create overlay chart for multiple categories
+      const dataSeries = groupNames.map(groupName => {{
+        const groupRows = groups[groupName];
+        const values = valuesFor(col, groupRows);
+        return {{ name: groupName, values: values.values }};
+      }});
+
+      const numeric = coerceNumericArray(dataSeries.flatMap(series => series.values));
+      const chartType = chartTypeSel.value === 'auto' ? 
+        (numeric && numeric.length ? 'violin' : 'bar') : 
+        chartTypeSel.value;
+        
+      if(chartType === 'violin' && numeric && numeric.length){{
+        // Numeric data - create violin plots
+        drawViolinPlot(canvas, dataSeries);
+        addTooltipToCanvas(canvas, tooltip, numeric);
+        footer.innerHTML=`<span class="badge">numeric (violin)</span> <span class="small">${{groupNames.length}} categories</span>`;
+      }} else if(chartType === 'scatter' && numeric && numeric.length){{
+        // Numeric data - create scatter plot (requires paired data)
+        drawScatterPlot(canvas, dataSeries);
+        addTooltipToCanvas(canvas, tooltip, numeric);
+        footer.innerHTML=`<span class="badge">numeric (scatter)</span> <span class="small">${{groupNames.length}} categories</span>`;
+      }} else {{
+        // Categorical data - create grouped bar chart
+        const allValues = dataSeries.flatMap(series => series.values);
+        const allCounts = catCounts(allValues, 15);
+        const labels = allCounts.map(([k,_])=>k==='__OTHER__'?'Other':k);
+        
+        const seriesData = dataSeries.map(series => {{
+          const seriesCounts = catCounts(series.values, 15);
+          const alignedCounts = allCounts.map(([key, _]) => {{
+            const found = seriesCounts.find(([k, _]) => k === key);
+            return found ? found[1] : 0;
+          }});
+          return {{ name: series.name, values: alignedCounts }};
+        }});
+        
+        drawGroupedBars(canvas, labels, seriesData, {{tickFmt:(t)=>{{const s=String(t);return s.length>8?s.slice(0,8)+'…':s;}}}});
+        footer.innerHTML=`<span class="badge">categorical (grouped)</span> <span class="small">${{groupNames.length}} categories</span>`;
+      }}
+
+      // Add legend
+      const legend = createLegend(groupNames, colors);
+      footer.appendChild(legend);
+    }} else {{
+      // Single category or no category - use original single chart
+      const {{values, missing}} = valuesFor(col, displayRows);
+      const numeric = coerceNumericArray(values);
+      const chartType = chartTypeSel.value === 'auto' ? 
+        (numeric && numeric.length ? 'histogram' : 'bar') : 
+        chartTypeSel.value;
+      
+      if(chartType === 'histogram' && numeric && numeric.length){{
+        const hist = makeHistogram(numeric);
+        drawBars(canvas, hist.bins, hist.counts, {{tickFmt:(x)=>{{const num=Number(x);if(!Number.isFinite(num))return'';const s=Math.abs(num)>=1000?(num/1000).toFixed(1)+'k':num.toFixed(2);return s.replace(/\\.00$/,'');}}}});
+        addTooltipToCanvas(canvas, tooltip, numeric);
+        const s = numericSummary(numeric);
+        footer.innerHTML=`<span class="badge">numeric (histogram)</span> <span class="small">min ${{s.min}}, q1 ${{s.q1}}, med ${{s.median}}, q3 ${{s.q3}}, max ${{s.max}}</span>`;
+      }} else if(chartType === 'violin' && numeric && numeric.length){{
+        // Single series violin plot
+        const dataSeries = [{{ name: col, values: numeric }}];
+        drawViolinPlot(canvas, dataSeries);
+        addTooltipToCanvas(canvas, tooltip, numeric);
+        const s = numericSummary(numeric);
+        footer.innerHTML=`<span class="badge">numeric (violin)</span> <span class="small">min ${{s.min}}, q1 ${{s.q1}}, med ${{s.median}}, q3 ${{s.q3}}, max ${{s.max}}</span>`;
+      }} else {{
+        const counts = catCounts(values, 15);
+        const labels = counts.map(([k,_])=>k==='__OTHER__'?'Other':k);
+        const vals = counts.map(([_,v])=>v);
+        drawBars(canvas, labels, vals, {{tickFmt:(t)=>{{const s=String(t);return s.length>8?s.slice(0,8)+'…':s;}}}});
+        footer.innerHTML=`<span class="badge">categorical</span> <span class="small">${{labels.length}} shown${{counts.length>labels.length?' (top)':''}}</span>`;
+      }}
+    }}
+
+    card.appendChild(header);
+    card.appendChild(canvasWrap);
+    card.appendChild(footer);
+    
+    // Add export buttons
+    addExportButtons(card, canvas, displayRows, col);
+  }}
+
   statsScopeSel.addEventListener('change', () => renderStats());
   categoricalSplitSel.addEventListener('change', () => renderStats());
+  chartTypeSel.addEventListener('change', () => renderStats());
+  clearCacheBtn.addEventListener('click', () => {{ clearStatsCache(); renderStats(); }});
   window.addEventListener('resize', () => {{ if (isStatsActive()) renderStats(); }});
 
   // ---- Init ----
