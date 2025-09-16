@@ -233,6 +233,8 @@ HTML_TEMPLATE = """<!doctype html>
   const DEFAULT_PAGE_SIZE = {page_size};
   const CHUNK_SIZE = {chunk_size};
   const SHOW_COLS = {show_cols_json};
+  const USE_THUMBNAILS = {use_thumbnails};
+  const THUMBNAIL_SIZE = {thumbnail_size};
 
   const grid = document.getElementById('grid');
   const counter = document.getElementById('counter');
@@ -375,7 +377,16 @@ HTML_TEMPLATE = """<!doctype html>
   function createTile(row) {{
     const tile = document.createElement('div'); tile.className = 'tile';
     const imgwrap = document.createElement('div'); imgwrap.className = 'imgwrap';
-    const img = document.createElement('img'); img.loading = 'lazy'; img.decoding = 'async'; img.src = row.src; img.alt = '';
+    const img = document.createElement('img'); img.loading = 'lazy'; img.decoding = 'async';
+    
+    // Use thumbnail URL if thumbnails are enabled, otherwise use original
+    if (USE_THUMBNAILS) {{
+      img.src = `/thumbnail/${{THUMBNAIL_SIZE}}/${{row.src}}`;
+    }} else {{
+      img.src = row.src;
+    }}
+    img.alt = '';
+    
     imgwrap.appendChild(img); tile.appendChild(imgwrap);
 
     const meta = document.createElement('div'); meta.className = 'meta';

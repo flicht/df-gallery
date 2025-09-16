@@ -6,6 +6,12 @@ from pathlib import Path
 from typing import Dict, Any, List
 from df_gallery.template import HTML_TEMPLATE
 
+try:
+    from df_gallery.thumbnail_server import ThumbnailServer, ThumbnailRequestHandler
+    THUMBNAIL_SERVER_AVAILABLE = True
+except ImportError:
+    THUMBNAIL_SERVER_AVAILABLE = False
+
 
 
 
@@ -102,7 +108,8 @@ def _read_rows(csv_path: Path, path_col: str, img_root: str, out_dir: Path, rela
     return rows
 
 def _render_html(*, title: str, rows: List[Dict[str, Any]], chunk_size: int, tile_px: int,
-                 show_cols: List[str] | None, collapse_meta: bool, page_size: int) -> str:
+                 show_cols: List[str] | None, collapse_meta: bool, page_size: int, 
+                 use_thumbnails: bool = False, thumbnail_size: int = 200) -> str:
     return HTML_TEMPLATE.format(
         title=title,
         rows_json=json.dumps(rows, ensure_ascii=False),
@@ -112,6 +119,8 @@ def _render_html(*, title: str, rows: List[Dict[str, Any]], chunk_size: int, til
         meta_class=("meta-hidden" if collapse_meta else ""),
         toggle_text=("Show meta" if collapse_meta else "Hide meta"),
         page_size=max(1, int(page_size)),
+        use_thumbnails=json.dumps(use_thumbnails),
+        thumbnail_size=thumbnail_size,
     )
 
 class _NoCacheHandler(SimpleHTTPRequestHandler):
@@ -127,7 +136,8 @@ class _NoCacheHandler(SimpleHTTPRequestHandler):
             self.path = "/" + self.html_name
         return super().do_GET()
 
-def _serve_file(html_path: Path, host: str, port: int, open_browser: bool):
+def _serve_file(html_path: Path, host: str, port: int, open_browser: bool, 
+                thumbnail_server: ThumbnailServer = None):
     root = html_path.parent.resolve()
     
     # Change to the directory containing the HTML file
@@ -135,12 +145,23 @@ def _serve_file(html_path: Path, host: str, port: int, open_browser: bool):
     os.chdir(root)
     
     try:
-        class CustomHandler(_NoCacheHandler):
-            html_name = html_path.name
+        if thumbnail_server:
+            # Use thumbnail-enabled handler
+            def handler_factory(*args, **kwargs):
+                return ThumbnailRequestHandler(thumbnail_server, *args, **kwargs)
+            
+            httpd = ThreadingHTTPServer((host, port), handler_factory)
+            print(f"Serving {html_path} with thumbnails at http://{host}:{port}/{html_path.name} (Ctrl+C to stop)")
+        else:
+            # Use standard handler
+            class CustomHandler(_NoCacheHandler):
+                html_name = html_path.name
+            
+            httpd = ThreadingHTTPServer((host, port), CustomHandler)
+            print(f"Serving {html_path} at http://{host}:{port}/{html_path.name} (Ctrl+C to stop)")
         
-        httpd = ThreadingHTTPServer((host, port), CustomHandler)
         url = f"http://{host}:{port}/{html_path.name}"
-        print(f"Serving {html_path} at {url} (Ctrl+C to stop)")
+        
         # only try to open if there looks to be a display (avoid headless SSH spam)
         if open_browser and os.environ.get("DISPLAY") and not os.environ.get("SSH_CONNECTION"):
             try:
@@ -160,6 +181,28 @@ def cmd_build(args) -> int:
     out_path = Path(args.out).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Setup thumbnail server if requested
+    thumbnail_server = None
+    if args.with_thumbnails:
+        if not THUMBNAIL_SERVER_AVAILABLE:
+            print("Error: Thumbnail server not available. PIL/Pillow is required.", file=sys.stderr)
+            return 1
+        
+        # Determine image root directory
+        img_root = Path(args.img_root) if args.img_root else out_path.parent
+        
+        try:
+            thumbnail_server = ThumbnailServer(
+                image_root=img_root,
+                cache_dir=Path(args.thumbnail_cache),
+                default_size=args.thumbnail_size,
+                quality=args.thumbnail_quality
+            )
+            print(f"Thumbnail server enabled (cache: {args.thumbnail_cache}, size: {args.thumbnail_size}px)")
+        except Exception as e:
+            print(f"Error initializing thumbnail server: {e}", file=sys.stderr)
+            return 1
+
     def build_once() -> List[Dict[str, Any]]:
         rows = _read_rows(
             csv_path=Path(args.csv),
@@ -178,6 +221,8 @@ def cmd_build(args) -> int:
             show_cols=args.show_cols,
             collapse_meta=args.collapse_meta,
             page_size=args.page_size,
+            use_thumbnails=args.with_thumbnails,
+            thumbnail_size=args.thumbnail_size,
         )
         out_path.write_text(html, encoding="utf-8")
         print(f"Wrote {out_path} with {len(rows)} items. Columns: {list(rows[0].keys())}")
@@ -211,10 +256,10 @@ def cmd_build(args) -> int:
                     break
         t = threading.Thread(target=watch_loop, daemon=True)
         t.start()
-        _serve_file(out_path, args.host, args.port, args.open_browser)
+        _serve_file(out_path, args.host, args.port, args.open_browser, thumbnail_server)
         return 0
     else:
-        _serve_file(out_path, args.host, args.port, args.open_browser)
+        _serve_file(out_path, args.host, args.port, args.open_browser, thumbnail_server)
         return 0
 
 def cmd_serve(args) -> int:
@@ -222,7 +267,30 @@ def cmd_serve(args) -> int:
     if not html_path.exists():
         print(f"error: file not found: {html_path}", file=sys.stderr)
         return 2
-    _serve_file(html_path, args.host, args.port, args.open_browser)
+    
+    # Setup thumbnail server if requested
+    thumbnail_server = None
+    if args.with_thumbnails:
+        if not THUMBNAIL_SERVER_AVAILABLE:
+            print("Error: Thumbnail server not available. PIL/Pillow is required.", file=sys.stderr)
+            return 1
+        
+        # For serve command, use the directory containing the HTML file
+        img_root = html_path.parent
+        
+        try:
+            thumbnail_server = ThumbnailServer(
+                image_root=img_root,
+                cache_dir=Path(args.thumbnail_cache),
+                default_size=args.thumbnail_size,
+                quality=args.thumbnail_quality
+            )
+            print(f"Thumbnail server enabled (cache: {args.thumbnail_cache}, size: {args.thumbnail_size}px)")
+        except Exception as e:
+            print(f"Error initializing thumbnail server: {e}", file=sys.stderr)
+            return 1
+    
+    _serve_file(html_path, args.host, args.port, args.open_browser, thumbnail_server)
     return 0
 
 def cmd_serve_dir(args) -> int:
@@ -231,6 +299,25 @@ def cmd_serve_dir(args) -> int:
     if not dir_path.exists() or not dir_path.is_dir():
         print(f"error: directory not found: {dir_path}", file=sys.stderr)
         return 2
+    
+    # Setup thumbnail server if requested
+    thumbnail_server = None
+    if args.with_thumbnails:
+        if not THUMBNAIL_SERVER_AVAILABLE:
+            print("Error: Thumbnail server not available. PIL/Pillow is required.", file=sys.stderr)
+            return 1
+        
+        try:
+            thumbnail_server = ThumbnailServer(
+                image_root=dir_path,
+                cache_dir=Path(args.thumbnail_cache),
+                default_size=args.thumbnail_size,
+                quality=args.thumbnail_quality
+            )
+            print(f"Thumbnail server enabled (cache: {args.thumbnail_cache}, size: {args.thumbnail_size}px)")
+        except Exception as e:
+            print(f"Error initializing thumbnail server: {e}", file=sys.stderr)
+            return 1
     
     print(f"Scanning directory: {dir_path}")
     rows = _scan_directory(dir_path, extract_metadata=args.extract_metadata)
@@ -250,6 +337,8 @@ def cmd_serve_dir(args) -> int:
         show_cols=args.show_cols,
         collapse_meta=args.collapse_meta,
         page_size=args.page_size,
+        use_thumbnails=args.with_thumbnails,
+        thumbnail_size=args.thumbnail_size,
     )
     
     # Write HTML file to the image directory so it can be served alongside images
@@ -259,7 +348,7 @@ def cmd_serve_dir(args) -> int:
     print(f"HTML file created successfully: {html_in_dir.exists()}")
     
     # Use the existing _serve_file function which properly handles server setup
-    _serve_file(html_in_dir, args.host, args.port, args.open_browser)
+    _serve_file(html_in_dir, args.host, args.port, args.open_browser, thumbnail_server)
     
     return 0
 
@@ -280,6 +369,11 @@ def main() -> int:
     b.add_argument("--show-cols", nargs="*", default=None, help="Subset of columns to show (defaults to all except 'src').")
     b.add_argument("--collapse-meta", action="store_true", help="Start with metadata hidden (global toggle controls all).")
     b.add_argument("--page-size", type=int, default=250, help="Initial page size (user can change in UI).")
+    # thumbnail options
+    b.add_argument("--with-thumbnails", action="store_true", help="Enable thumbnail server for faster loading")
+    b.add_argument("--thumbnail-size", type=int, default=200, help="Default thumbnail size in px (default: 200)")
+    b.add_argument("--thumbnail-quality", type=int, default=85, help="Thumbnail quality 1-100 (default: 85)")
+    b.add_argument("--thumbnail-cache", default=".df_gallery_cache", help="Thumbnail cache directory (default: .df_gallery_cache)")
     # serve/watch options for build
     b.add_argument("--serve", action="store_true", help="Start a local HTTP server after building")
     b.add_argument("--watch", action="store_true", help="Rebuild when the CSV changes (implies --serve)")
@@ -302,6 +396,11 @@ def main() -> int:
     s.add_argument("--show-cols", nargs="*", default=None, help="Subset of columns to show (defaults to all except 'src').")
     s.add_argument("--collapse-meta", action="store_true", help="Start with metadata hidden (global toggle controls all).")
     s.add_argument("--page-size", type=int, default=250, help="Initial page size (user can change in UI).")
+    # thumbnail options
+    s.add_argument("--with-thumbnails", action="store_true", help="Enable thumbnail server for faster loading")
+    s.add_argument("--thumbnail-size", type=int, default=200, help="Default thumbnail size in px (default: 200)")
+    s.add_argument("--thumbnail-quality", type=int, default=85, help="Thumbnail quality 1-100 (default: 85)")
+    s.add_argument("--thumbnail-cache", default=".df_gallery_cache", help="Thumbnail cache directory (default: .df_gallery_cache)")
     s.add_argument("--open", dest="open_browser", action="store_true", help="Open browser after starting server")
     s.add_argument("--no-open", dest="open_browser", action="store_false", help="Do not open browser")
     s.set_defaults(open_browser=True, func=cmd_serve)
