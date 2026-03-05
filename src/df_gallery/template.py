@@ -139,11 +139,7 @@ HTML_TEMPLATE = """<!doctype html>
         <button id="last">⏭</button>
         <label class="hint">Page size</label>
         <select id="page-size">
-          <option>50</option>
-          <option>100</option>
-          <option selected>{page_size}</option>
-          <option>500</option>
-          <option>1000</option>
+{page_size_options}
         </select>
       </div>
     </div>
@@ -233,7 +229,7 @@ HTML_TEMPLATE = """<!doctype html>
   const statsSummary = document.getElementById('stats-summary');
 
   let filtered = DATA.slice();
-  let order = filtered.map(r => r.src);
+  let order = filtered.map((_, i) => i);
   let rendered = 0;
 
   let pageIndex = 0; // 0-based
@@ -308,7 +304,7 @@ HTML_TEMPLATE = """<!doctype html>
       for (const r of DATA) {{ try {{ if (pred(r)) out.push(r); }} catch (e) {{ throw e; }} }}
       filtered = out;
     }}
-    order = filtered.map(r => r.src);
+    order = filtered.map((_, i) => i);
     pageIndex = 0;
     renderAll();
     if (isStatsActive()) renderStats();
@@ -362,9 +358,8 @@ HTML_TEMPLATE = """<!doctype html>
     if (rendered >= end - start) return;
     const upto = Math.min(start + rendered + CHUNK_SIZE, end);
     const frag = document.createDocumentFragment();
-    const idx = new Map(filtered.map(r => [r.src, r]));
     for (let i = start + rendered; i < upto; i++) {{
-      const row = idx.get(order[i]);
+      const row = filtered[order[i]];
       if (row) frag.appendChild(createTile(row));
     }}
     grid.appendChild(frag);
@@ -390,6 +385,7 @@ HTML_TEMPLATE = """<!doctype html>
   document.getElementById('shuffle').addEventListener('click', () => {{ shuffleInPlace(order); pageIndex = 0; renderAll(); }});
   document.getElementById('size').addEventListener('input', (e) => {{ const px = parseInt(e.target.value, 10) || {tile_px}; document.documentElement.style.setProperty('--tile', px + 'px'); }});
   document.getElementById('apply').addEventListener('click', () => {{ try {{ applyFilter(filterInput.value); }} catch (e) {{ err.textContent = e.message; }} }});
+  filterInput.addEventListener('keydown', (e) => {{ if (e.key === 'Enter') {{ try {{ applyFilter(filterInput.value); }} catch (ex) {{ err.textContent = ex.message; }} }} }});
   document.getElementById('clear').addEventListener('click', () => {{ filterInput.value = ''; applyFilter(''); }});
   document.getElementById('examples').addEventListener('change', (e) => {{ if (e.target.value) {{ filterInput.value = e.target.value; e.target.selectedIndex = 0; }} }});
 
@@ -460,8 +456,8 @@ HTML_TEMPLATE = """<!doctype html>
     if(!arr.length) return{{bins:[],counts:[],lo:0,hi:1}};
     const{{min,q1,q3,max}}=numericSummary(arr);
     const iqr=q3-q1;
-    const lo=Math.min(min,q1-1.5*iqr);
-    const hi=Math.max(max,q3+1.5*iqr);
+    const lo=Math.max(min,q1-1.5*iqr);
+    const hi=Math.min(max,q3+1.5*iqr);
     const k=chooseBins(arr.length);
     const width=(hi-lo)||1;
     const step=width/k;
@@ -863,40 +859,44 @@ HTML_TEMPLATE = """<!doctype html>
       ctx.fill();
       ctx.stroke();
       
-      // Draw box plot inside violin
-      const boxY = y0 - (boxStats.median - yMin) / (yMax - yMin) * chartH;
-      const boxH = Math.max(4 * dpr, (boxStats.q3 - boxStats.q1) / (yMax - yMin) * chartH);
-      
+      // Draw box plot inside violin — box spans Q1→Q3, median line inside
+      const medianY = y0 - (boxStats.median - yMin) / (yMax - yMin) * chartH;
+      const q1Y = y0 - (boxStats.q1 - yMin) / (yMax - yMin) * chartH;
+      const q3Y = y0 - (boxStats.q3 - yMin) / (yMax - yMin) * chartH;
+      const boxTop = q3Y;    // q3 is larger value → smaller canvas y
+      const boxBottom = q1Y; // q1 is smaller value → larger canvas y
+      const boxH = Math.max(4 * dpr, boxBottom - boxTop);
+
       // Box
       ctx.fillStyle = '#ffffff';
-      ctx.fillRect(centerX - 8 * dpr, boxY - boxH/2, 16 * dpr, boxH);
+      ctx.fillRect(centerX - 8 * dpr, boxTop, 16 * dpr, boxH);
       ctx.strokeStyle = color;
       ctx.lineWidth = 2 * dpr;
-      ctx.strokeRect(centerX - 8 * dpr, boxY - boxH/2, 16 * dpr, boxH);
-      
+      ctx.strokeRect(centerX - 8 * dpr, boxTop, 16 * dpr, boxH);
+
       // Median line
       ctx.strokeStyle = color;
       ctx.lineWidth = 3 * dpr;
       ctx.beginPath();
-      ctx.moveTo(centerX - 8 * dpr, boxY);
-      ctx.lineTo(centerX + 8 * dpr, boxY);
+      ctx.moveTo(centerX - 8 * dpr, medianY);
+      ctx.lineTo(centerX + 8 * dpr, medianY);
       ctx.stroke();
-      
+
       // Whiskers
-      const whiskerY1 = y0 - (boxStats.min - yMin) / (yMax - yMin) * chartH;
-      const whiskerY2 = y0 - (boxStats.max - yMin) / (yMax - yMin) * chartH;
-      
+      const whiskerY1 = y0 - (boxStats.min - yMin) / (yMax - yMin) * chartH; // lower (min)
+      const whiskerY2 = y0 - (boxStats.max - yMin) / (yMax - yMin) * chartH; // upper (max)
+
       ctx.strokeStyle = color;
       ctx.lineWidth = 2 * dpr;
       ctx.beginPath();
-      ctx.moveTo(centerX, boxY - boxH/2);
-      ctx.lineTo(centerX, whiskerY1);
-      ctx.moveTo(centerX - 4 * dpr, whiskerY1);
-      ctx.lineTo(centerX + 4 * dpr, whiskerY1);
-      ctx.moveTo(centerX, boxY + boxH/2);
+      ctx.moveTo(centerX, boxTop);            // Q3 up to max
       ctx.lineTo(centerX, whiskerY2);
       ctx.moveTo(centerX - 4 * dpr, whiskerY2);
       ctx.lineTo(centerX + 4 * dpr, whiskerY2);
+      ctx.moveTo(centerX, boxBottom);         // Q1 down to min
+      ctx.lineTo(centerX, whiskerY1);
+      ctx.moveTo(centerX - 4 * dpr, whiskerY1);
+      ctx.lineTo(centerX + 4 * dpr, whiskerY1);
       ctx.stroke();
       
       // Outliers
@@ -1070,7 +1070,6 @@ HTML_TEMPLATE = """<!doctype html>
   // ---- Init ----
   window.addEventListener('load', () => {{
     setMetaHidden(document.documentElement.classList.contains('meta-hidden'));
-    [...pageSizeSel.options].forEach(o => {{ if (parseInt(o.value,10) === DEFAULT_PAGE_SIZE) o.selected = true; }});
     populateCategoricalDropdown(DATA);
     applyFilter('');
   }});

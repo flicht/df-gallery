@@ -54,6 +54,31 @@ def _scan_directory(dir_path: Path, extract_metadata: bool = False) -> List[Dict
     
     return rows
 
+def _read_rows_json(json_path: Path, path_col: str, img_root: str, out_dir: Path, relative_to_html: bool) -> List[Dict[str, Any]]:
+    import json as _json
+    with json_path.open(encoding="utf-8") as f:
+        data = _json.load(f)
+    if not isinstance(data, list):
+        raise SystemExit("JSON file must be a top-level array of objects.")
+    if data and path_col not in data[0]:
+        raise SystemExit(f"Column '{path_col}' not found. Available: {list(data[0].keys())}")
+    rows: List[Dict[str, Any]] = []
+    for r in data:
+        raw = str(r.get(path_col) or "").strip()
+        if not raw:
+            continue
+        row = dict(r)
+        if raw.startswith(("http://", "https://", "data:")):
+            src = raw
+        else:
+            p = Path(raw)
+            if img_root:
+                p = Path(img_root) / p
+            src = _rel_to(out_dir, p) if relative_to_html else str(p).replace("\\", "/")
+        row["src"] = src
+        rows.append(row)
+    return rows
+
 def _coerce_value(v: str):
     s = (v or "").strip()
     if s == "":
@@ -101,6 +126,18 @@ def _read_rows(csv_path: Path, path_col: str, img_root: str, out_dir: Path, rela
             rows.append(row)
     return rows
 
+def _load_rows(path: Path, path_col: str, img_root: str, out_dir: Path, relative_to_html: bool) -> List[Dict[str, Any]]:
+    if path.suffix.lower() == ".json":
+        return _read_rows_json(path, path_col, img_root, out_dir, relative_to_html)
+    return _read_rows(path, path_col, img_root, out_dir, relative_to_html)
+
+def _page_size_options(page_size: int) -> str:
+    options = sorted({50, 100, 500, 1000, max(1, page_size)})
+    return "\n".join(
+        f'          <option{"  selected" if o == page_size else ""}>{o}</option>'
+        for o in options
+    )
+
 def _render_html(*, title: str, rows: List[Dict[str, Any]], chunk_size: int, tile_px: int,
                  show_cols: List[str] | None, collapse_meta: bool, page_size: int) -> str:
     return HTML_TEMPLATE.format(
@@ -112,6 +149,7 @@ def _render_html(*, title: str, rows: List[Dict[str, Any]], chunk_size: int, til
         meta_class=("meta-hidden" if collapse_meta else ""),
         toggle_text=("Show meta" if collapse_meta else "Hide meta"),
         page_size=max(1, int(page_size)),
+        page_size_options=_page_size_options(max(1, int(page_size))),
     )
 
 class _NoCacheHandler(SimpleHTTPRequestHandler):
@@ -142,7 +180,7 @@ def _serve_file(html_path: Path, host: str, port: int, open_browser: bool):
         url = f"http://{host}:{port}/{html_path.name}"
         print(f"Serving {html_path} at {url} (Ctrl+C to stop)")
         # only try to open if there looks to be a display (avoid headless SSH spam)
-        if open_browser and os.environ.get("DISPLAY") and not os.environ.get("SSH_CONNECTION"):
+        if open_browser and (sys.platform == "darwin" or os.environ.get("DISPLAY")) and not os.environ.get("SSH_CONNECTION"):
             try:
                 webbrowser.open(url)
             except Exception:
@@ -161,8 +199,8 @@ def cmd_build(args) -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     def build_once() -> List[Dict[str, Any]]:
-        rows = _read_rows(
-            csv_path=Path(args.csv),
+        rows = _load_rows(
+            path=Path(args.csv),
             path_col=args.path_col,
             img_root=args.img_root,
             out_dir=out_path.parent,
@@ -290,8 +328,8 @@ def main() -> int:
     b.set_defaults(open_browser=True, func=cmd_build)
 
     # serve subcommand
-    s = sub.add_parser("serve", help="Serve an existing gallery HTML or serve images from a directory.")
-    s.add_argument("html", nargs="?", help="Path to gallery.html (optional if --dir is used)")
+    s = sub.add_parser("serve", help="Serve images from a directory or an existing gallery HTML.")
+    s.add_argument("html", nargs="?", metavar="path", help="Directory of images, or path to an existing gallery.html")
     s.add_argument("--dir", help="Directory containing images to serve")
     s.add_argument("--host", default="127.0.0.1", help="Host (default: 127.0.0.1)")
     s.add_argument("--port", type=int, default=8010, help="Port (default: 8010)")
@@ -311,13 +349,14 @@ def main() -> int:
     # Handle serve command logic
     if args.cmd == "serve":
         if args.dir:
-            # Directory mode - use cmd_serve_dir
             return cmd_serve_dir(args)
         elif args.html:
-            # File mode - use cmd_serve
+            if Path(args.html).is_dir():
+                args.dir = args.html
+                return cmd_serve_dir(args)
             return cmd_serve(args)
         else:
-            print("error: must specify either HTML file or --dir", file=sys.stderr)
+            print("error: must specify either an HTML file or a directory", file=sys.stderr)
             return 2
     
     return args.func(args)

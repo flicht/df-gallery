@@ -25,8 +25,8 @@ classifiers = [
 # No runtime deps; uses stdlib only
 
 [project.urls]
-Homepage = "https://github.com/yourname/df-gallery"
-Issues = "https://github.com/yourname/df-gallery/issues"
+Homepage = "https://github.com/flicht/df-gallery"
+Issues = "https://github.com/flicht/df-gallery/issues"
 
 [project.scripts]
 df-gallery = "df_gallery.cli:main"
