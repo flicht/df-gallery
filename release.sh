@@ -30,4 +30,6 @@ git commit -m "release $VERSION"
 git tag "v$VERSION"
 git push origin master --tags
 
-echo "Done. Monitor the release at: https://github.com/flicht/df-gallery/actions"
+gh release create "v$VERSION" --title "v$VERSION" --generate-notes
+
+echo "Done. https://github.com/flicht/df-gallery/releases/tag/v$VERSION"
